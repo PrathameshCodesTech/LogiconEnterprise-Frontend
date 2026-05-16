@@ -1,8 +1,12 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { createMRFLineItem, deleteMRFLineItem, listMRFLineItems, updateMRFLineItem } from '@/api/mrf'
 import { listJobRoles, type JobRoleRow } from '@/api/jobs'
-import { listSiteRoleRequirements, type SiteRoleRequirementRow } from '@/api/siteRoleRequirements'
+import {
+  listSiteRoleRequirements,
+  type BillingType as SrrBillingType,
+  type SiteRoleRequirementRow,
+} from '@/api/siteRoleRequirements'
 import { listWageCategories, type WageCategoryRow } from '@/api/wages'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
@@ -14,8 +18,12 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { MRFLineItemForm, type Option } from '@/features/mrf/MRFLineItemForm'
+import { formatLineItemBillableImpact } from '@/features/mrf/mrfBudgetContext'
+import { formatLineItemSrrSummary } from '@/features/mrf/mrfSrrDisplay'
 import type { SiteOption } from '@/features/mrf/MRFForm'
-import type { MRFLineItemRow, MRFLineItemWriteInput, MRFRow } from '@/features/mrf/types'
+import { Badge } from '@/components/ui/Badge'
+import { formatMoneyAmount } from '@/features/budgets/budgetDisplay'
+import type { MRFLineItemRow, MRFLineItemWriteInput, MRFReadinessLineItem, MRFRow } from '@/features/mrf/types'
 
 function lineItemBudgetPlanSummary(r: MRFLineItemRow, parent: MRFRow): string {
   if (r.budget_plan != null && (r.budget_plan_name || r.budget_plan_code)) {
@@ -32,11 +40,19 @@ export function MRFLineItemsTable({
   siteId,
   parentMrf,
   siteOptions,
+  readinessLineItems,
+  onChanged,
+  openCreateSignal,
+  onOpenCreateHandled,
 }: {
   mrfId: number
   siteId: number
   parentMrf: MRFRow
   siteOptions: SiteOption[]
+  readinessLineItems?: MRFReadinessLineItem[]
+  onChanged?: () => void
+  openCreateSignal?: boolean
+  onOpenCreateHandled?: () => void
 }) {
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
   const canWrite = hasAnyCapability(meCaps, [CAP.MRF_UPDATE])
@@ -55,14 +71,8 @@ export function MRFLineItemsTable({
     () => jobRoles.map((r) => ({ id: r.id, label: `${r.name} (${r.code})` })),
     [jobRoles],
   )
-  const srrOptions: Option[] = useMemo(
-    () =>
-      srrs.map((s) => ({
-        id: s.id,
-        label: `SRR #${s.id} - role ${s.job_role} - headcount ${s.approved_headcount}`,
-      })),
-    [srrs],
-  )
+  const isBillable = parentMrf.billing_type === 'billable'
+  const billableMissingDepartment = isBillable && !parentMrf.required_department
   const wageOptions: Option[] = useMemo(
     () => wageCategories.map((w) => ({ id: w.id, label: `${w.name} (${w.code})` })),
     [wageCategories],
@@ -70,6 +80,12 @@ export function MRFLineItemsTable({
 
   const roleNameById = useMemo(() => new Map(jobRoles.map((r) => [r.id, r.name])), [jobRoles])
   const wageNameById = useMemo(() => new Map(wageCategories.map((w) => [w.id, w.name])), [wageCategories])
+  const readinessByLineId = useMemo(
+    () => new Map((readinessLineItems ?? []).map((li) => [li.line_item_id, li])),
+    [readinessLineItems],
+  )
+  const showReadinessCols = (readinessLineItems?.length ?? 0) > 0
+  const currency = parentMrf.budget_plan_currency ?? 'INR'
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<MRFLineItemRow | null>(null)
@@ -94,9 +110,24 @@ export function MRFLineItemsTable({
   async function loadLookups() {
     setLookupError(null)
     try {
+      const billingType =
+        parentMrf.billing_type === 'billable' || parentMrf.billing_type === 'non_billable'
+          ? (parentMrf.billing_type as SrrBillingType)
+          : undefined
+
+      const srrParams = {
+        site: siteId,
+        is_active: true,
+        billing_type: billingType,
+        page: 1,
+      }
+      if (isBillable && parentMrf.required_department) {
+        Object.assign(srrParams, { department: parentMrf.required_department })
+      }
+
       const [roles, srr, wages] = await Promise.all([
         listJobRoles(''),
-        listSiteRoleRequirements({ search: '', site: siteId, page: 1 }),
+        listSiteRoleRequirements(srrParams),
         listWageCategories(''),
       ])
       setJobRoles(roles)
@@ -114,7 +145,15 @@ export function MRFLineItemsTable({
     void refresh()
     void loadLookups()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrfId, siteId])
+  }, [mrfId, siteId, parentMrf.required_department, parentMrf.billing_type])
+
+  useEffect(() => {
+    if (openCreateSignal) {
+      openCreate()
+      onOpenCreateHandled?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCreateSignal])
 
   function openCreate() {
     setEditing(null)
@@ -147,6 +186,7 @@ export function MRFLineItemsTable({
       }
       closeDrawer()
       await refresh()
+      onChanged?.()
     } catch (e: unknown) {
       setFormError(parseApiError(e, 'Save failed').message)
     } finally {
@@ -161,6 +201,7 @@ export function MRFLineItemsTable({
     try {
       await deleteMRFLineItem(row.id)
       await refresh()
+      onChanged?.()
     } catch (e: unknown) {
       alert(parseApiError(e, 'Delete failed').message)
     }
@@ -171,15 +212,30 @@ export function MRFLineItemsTable({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-app-text">Line items</p>
-          <p className="text-xs text-app-secondary">Job role headcount and wage/budget details.</p>
+          <p className="text-xs text-app-secondary">
+            {isBillable
+              ? 'Select approved site role requirements for this site and required department.'
+              : 'Job role headcount and wage/budget details.'}
+          </p>
         </div>
         {canWrite ? (
-          <Button type="button" className="min-h-9 px-3" onClick={openCreate} disabled={!!lookupError}>
+          <Button
+            type="button"
+            className="min-h-9 px-3"
+            onClick={openCreate}
+            disabled={!!lookupError || billableMissingDepartment}
+          >
             <Plus className="mr-2 h-4 w-4" aria-hidden />
             Add line item
           </Button>
         ) : null}
       </div>
+
+      {billableMissingDepartment ? (
+        <p className="mt-3 text-xs text-status-warning">
+          Set the MRF required department before adding billable line items from site role requirements.
+        </p>
+      ) : null}
 
       {lookupError ? <ErrorState message={`Lookup API failed. Add/Edit is disabled. ${lookupError}`} /> : null}
 
@@ -201,22 +257,51 @@ export function MRFLineItemsTable({
             <THead>
               <TR>
                 <TH>Role</TH>
-                <TH>Headcount</TH>
-                <TH>SRR</TH>
+                <TH>{isBillable ? 'Headcount / billing' : 'Headcount'}</TH>
+                <TH>Site role requirement</TH>
                 <TH>Wage</TH>
                 <TH>Budget plan</TH>
+                {showReadinessCols ? (
+                  <>
+                    <TH>Remaining</TH>
+                    <TH>Est. amount</TH>
+                    <TH>Readiness</TH>
+                  </>
+                ) : null}
                 <TH className="text-right">Actions</TH>
               </TR>
             </THead>
             <TBody>
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const ri = readinessByLineId.get(r.id)
+                const srrInfo = formatLineItemSrrSummary(r)
+                const billableImpact = isBillable ? formatLineItemBillableImpact(r, ri) : null
+                return (
                 <TR key={r.id}>
                   <TD className="text-sm text-app-text">
                     {roleNameById.get(r.job_role) ?? `Role #${r.job_role}`}
                   </TD>
-                  <TD className="text-sm text-app-secondary">{r.headcount}</TD>
-                  <TD className="text-xs text-app-secondary">
-                    {r.site_role_requirement ? `#${r.site_role_requirement}` : '-'}
+                  <TD className="text-sm text-app-secondary">
+                    {billableImpact ? (
+                      <div className="space-y-0.5">
+                        <div className="text-xs">{billableImpact.headcountLine}</div>
+                        {billableImpact.amountLine ? (
+                          <div className="text-[10px] text-app-subtle tabular-nums">{billableImpact.amountLine}</div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      r.headcount
+                    )}
+                  </TD>
+                  <TD className="max-w-[14rem] text-xs text-app-secondary">
+                    <div className="font-medium text-app-text truncate" title={srrInfo.primary}>
+                      {srrInfo.primary}
+                    </div>
+                    {srrInfo.secondary ? (
+                      <div className="mt-0.5 truncate text-app-subtle" title={srrInfo.secondary}>
+                        {srrInfo.secondary}
+                      </div>
+                    ) : null}
                   </TD>
                   <TD className="text-xs text-app-secondary">
                     {r.wage_category ? (
@@ -240,10 +325,27 @@ export function MRFLineItemsTable({
                     <div className="font-medium text-app-text">{lineItemBudgetPlanSummary(r, parentMrf)}</div>
                     {r.budget_min || r.budget_max ? (
                       <div className="mt-0.5 text-app-subtle">
-                        Range: {r.budget_min ?? '-'} – {r.budget_max ?? '-'}
+                        Range: {r.budget_min ?? '?'} ? {r.budget_max ?? '?'}
                       </div>
                     ) : null}
                   </TD>
+                  {showReadinessCols ? (
+                    <>
+                      <TD className="text-xs tabular-nums text-app-secondary">
+                        {ri?.remaining_headcount ?? '?'}
+                      </TD>
+                      <TD className="text-xs tabular-nums text-app-secondary">
+                        {ri ? formatMoneyAmount(ri.estimated_amount, currency) : '?'}
+                      </TD>
+                      <TD className="text-xs">
+                        {ri ? (
+                          <Badge variant={ri.ok ? 'success' : 'danger'}>{ri.ok ? 'OK' : 'Issue'}</Badge>
+                        ) : (
+                          '?'
+                        )}
+                      </TD>
+                    </>
+                  ) : null}
                   <TD className="text-right">
                     <div className="flex justify-end gap-2">
                       {canWrite ? (
@@ -259,7 +361,7 @@ export function MRFLineItemsTable({
                     </div>
                   </TD>
                 </TR>
-              ))}
+              )})}
             </TBody>
           </Table>
         </div>
@@ -291,7 +393,7 @@ export function MRFLineItemsTable({
           errorMessage={formError}
           onSubmit={submit}
           jobRoleOptions={jobRoleOptions}
-          siteRoleRequirementOptions={srrOptions}
+          srrRows={srrs}
           wageCategoryOptions={wageOptions}
           lookupError={lookupError}
         />

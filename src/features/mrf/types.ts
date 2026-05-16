@@ -39,6 +39,14 @@ export interface MRFLineItemRow {
   budget_plan_currency?: string | null
   budget_plan_status?: string | null
   budget_plan_nature?: string | null
+  site_role_requirement_label?: string | null
+  srr_department_name?: string | null
+  srr_approved_headcount?: number | null
+  srr_remaining_headcount?: number | null
+  srr_wage_min?: string | null
+  srr_wage_max?: string | null
+  srr_billing_rate?: string | null
+  srr_shift_hours?: string | null
 }
 
 export type MRFWorkflowStatus = 'not_started' | 'active' | 'approved' | 'rejected' | 'cancelled' | string
@@ -119,6 +127,16 @@ export interface MRFRow {
   budget_reserved_amount?: string | null
   budget_committed_amount?: string | null
   budget_reservation_status?: MRFBudgetReservationStatus | string | null
+  resolved_budget_plan_id?: number | null
+  resolved_budget_plan_name?: string | null
+  resolved_budget_plan_code?: string | null
+  resolved_budget_scope?: string | null
+  resolved_budget_total_amount?: string | null
+  resolved_budget_reserved_amount?: string | null
+  resolved_budget_committed_amount?: string | null
+  resolved_budget_available_amount?: string | null
+  requested_budget_amount?: string | null
+  budget_after_request_available_amount?: string | null
 }
 
 export interface MRFWriteInput {
@@ -163,4 +181,43 @@ export interface MRFLineItemWriteInput {
   budget_min?: number | null
   budget_max?: number | null
   budget_plan?: number | null
+}
+
+// ─── Readiness (GET /api/mrf/requests/{id}/readiness/) ─────────────────────
+
+export interface MRFReadinessLineItem {
+  line_item_id: number | null
+  ok: boolean
+  errors: string[]
+  warnings: string[]
+  requested_headcount: number
+  approved_headcount: number | null
+  already_allocated_headcount: number
+  remaining_headcount: number | null
+  estimated_amount: string
+}
+
+export interface MRFReadinessBudget {
+  budget_plan_id?: number | null
+  plan_id?: number | null
+  plan_name?: string | null
+  plan_code?: string | null
+  scope?: string | null
+  total_amount?: string | null
+  available_amount: string
+  requested_amount?: string | null
+  available_after_request?: string | null
+  required_amount: string
+  reserved_amount: string
+  committed_amount: string
+  ok: boolean
+  sufficient?: boolean
+}
+
+export interface MRFReadinessResponse {
+  ok: boolean
+  errors: string[]
+  warnings: string[]
+  line_items: MRFReadinessLineItem[]
+  budget: MRFReadinessBudget
 }

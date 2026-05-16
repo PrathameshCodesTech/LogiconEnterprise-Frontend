@@ -3,6 +3,7 @@ import { unwrapDrfResults } from '@/types/api'
 import type {
   MRFLineItemRow,
   MRFLineItemWriteInput,
+  MRFReadinessResponse,
   MRFRow,
   MRFWriteInput,
 } from '@/features/mrf/types'
@@ -33,6 +34,11 @@ export async function listMRFs(params: ListMRFsParams): Promise<{ items: MRFRow[
 export async function getMRF(id: number): Promise<MRFRow> {
   const res = await api.get(`/api/mrf/requests/${id}/`)
   return res.data as MRFRow
+}
+
+export async function getMRFReadiness(mrfId: number): Promise<MRFReadinessResponse> {
+  const res = await api.get(`/api/mrf/requests/${mrfId}/readiness/`)
+  return res.data as MRFReadinessResponse
 }
 
 export async function createMRF(payload: MRFWriteInput): Promise<MRFRow> {

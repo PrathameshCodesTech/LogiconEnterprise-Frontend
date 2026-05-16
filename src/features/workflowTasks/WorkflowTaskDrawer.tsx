@@ -2,8 +2,7 @@
 import axios from 'axios'
 import { actOnWorkflowStep, getMyWorkflowTaskDetail } from '@/api/workflow'
 import { parseApiError } from '@/lib/apiError'
-import { formatMoneyAmount, budgetReservationStatusLabel, budgetReservationStatusVariant } from '@/features/budgets/budgetDisplay'
-import { formatBudgetAmount } from '@/features/budgets/types'
+import { MRFBudgetImpactPanel, formatLineItemBillableImpact, formatMoney } from '@/features/mrf/mrfBudgetContext'
 import type {
   WorkflowAction,
   WorkflowMyTask,
@@ -15,7 +14,6 @@ import type {
   WorkflowTaskTarget,
 } from '@/features/workflow/types'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { Drawer } from '@/components/ui/Drawer'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
@@ -120,55 +118,6 @@ function OverviewTab({ task }: { task: WorkflowMyTask }) {
   )
 }
 
-function BudgetBlockMrf({ mrf }: { mrf: WorkflowTaskMRF }) {
-  const hasPlan = mrf.budget_plan != null || !!mrf.budget_plan_name?.trim()
-  const taskIncludesReservationFields =
-    mrf.budget_reserved_amount != null ||
-    mrf.budget_committed_amount != null ||
-    (mrf.budget_reservation_status != null && mrf.budget_reservation_status !== '')
-
-  if (!hasPlan && !taskIncludesReservationFields) return null
-
-  const cur = mrf.budget_plan_currency ?? 'INR'
-
-  return (
-    <div className="rounded-panel border border-app-border bg-app-muted p-3">
-      {hasPlan ? (
-        <>
-          <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Budget plan</p>
-          <p className="mt-1 text-sm font-medium text-app-text">
-            {mrf.budget_plan_name ?? 'Linked plan'}
-            {mrf.budget_plan_code ? <span className="ml-1 font-mono text-xs text-app-secondary">({mrf.budget_plan_code})</span> : null}
-          </p>
-          {mrf.budget_plan_amount != null ? (
-            <p className="mt-1 text-xs text-app-secondary">
-              {formatBudgetAmount(String(mrf.budget_plan_amount), cur)} - {mrf.budget_plan_status ?? '-'}
-            </p>
-          ) : mrf.budget_plan_status ? (
-            <p className="mt-1 text-xs text-app-secondary">{mrf.budget_plan_status}</p>
-          ) : null}
-        </>
-      ) : null}
-      {taskIncludesReservationFields ? (
-        <div className={hasPlan ? 'mt-3 border-t border-app-border pt-3' : ''}>
-          <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Budget reservation</p>
-          <div className="mt-1">
-            <Badge variant={budgetReservationStatusVariant(mrf.budget_reservation_status)}>
-              {budgetReservationStatusLabel(mrf.budget_reservation_status)}
-            </Badge>
-          </div>
-          <p className="mt-1 text-xs text-app-secondary">
-            Reserved budget: {formatMoneyAmount(mrf.budget_reserved_amount, cur)}
-          </p>
-          <p className="text-xs text-app-secondary">
-            Committed budget: {formatMoneyAmount(mrf.budget_committed_amount, cur)}
-          </p>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 function RequestTabMrf({ mrf }: { mrf: WorkflowTaskMRF }) {
   return (
     <div className="space-y-4 text-sm">
@@ -212,41 +161,75 @@ function RequestTabMrf({ mrf }: { mrf: WorkflowTaskMRF }) {
           <p className="mt-1 whitespace-pre-wrap text-app-secondary">{mrf.reason}</p>
         </div>
       ) : null}
-      <BudgetBlockMrf mrf={mrf} />
+      <MRFBudgetImpactPanel
+        source={mrf}
+        clientName={mrf.client_name}
+        siteName={mrf.site_name}
+        departmentName={mrf.required_department_name}
+        approverMode
+        className="mt-2"
+      />
     </div>
   )
 }
 
-function LineItemsTab({ items }: { items: WorkflowTaskMRFLineItem[] }) {
+function LineItemsTab({ items, billingType }: { items: WorkflowTaskMRFLineItem[]; billingType?: string }) {
   if (items.length === 0) {
     return <p className="text-sm text-app-secondary">No line items found.</p>
   }
+  const isBillable = billingType === 'billable'
   return (
     <div className="overflow-x-auto rounded-panel border border-app-border">
       <Table>
         <THead>
           <TR>
             <TH className="py-2">Job role</TH>
-            <TH className="py-2">Headcount</TH>
-            <TH className="py-2">Wage category</TH>
-            <TH className="py-2">Wage range</TH>
-            <TH className="py-2">Billing rate</TH>
-            <TH className="py-2">Budget plan</TH>
+            {isBillable ? (
+              <>
+                <TH className="py-2">Headcount impact</TH>
+                <TH className="py-2">Billing / estimate</TH>
+              </>
+            ) : (
+              <>
+                <TH className="py-2">Headcount</TH>
+                <TH className="py-2">Wage category</TH>
+                <TH className="py-2">Wage range</TH>
+                <TH className="py-2">Billing rate</TH>
+              </>
+            )}
           </TR>
         </THead>
         <TBody>
-          {items.map((li) => (
-            <TR key={li.id}>
-              <TD className="py-2 text-sm">{li.job_role_name ?? (li.job_role != null ? `#${li.job_role}` : '-')}</TD>
-              <TD className="py-2 text-sm">{li.headcount}</TD>
-              <TD className="py-2 text-xs text-app-secondary">{li.wage_category_name ?? '-'}</TD>
-              <TD className="py-2 text-xs text-app-secondary">
-                {li.wage_min_requested ?? '-'} - {li.wage_max_requested ?? '-'}
-              </TD>
-              <TD className="py-2 text-xs text-app-secondary">{li.billing_rate_snapshot ?? '-'}</TD>
-              <TD className="py-2 text-xs text-app-secondary">{li.budget_plan_name ?? (li.budget_plan != null ? `#${li.budget_plan}` : '-')}</TD>
-            </TR>
-          ))}
+          {items.map((li) => {
+            const impact = formatLineItemBillableImpact(li, null)
+            return (
+              <TR key={li.id}>
+                <TD className="py-2 text-sm">{li.job_role_name ?? (li.job_role != null ? `#${li.job_role}` : '-')}</TD>
+                {isBillable ? (
+                  <>
+                    <TD className="py-2 text-xs text-app-secondary">
+                      <div>{impact.headcountLine}</div>
+                      {li.site_role_requirement_label ? (
+                        <p className="mt-0.5 text-app-subtle">{li.site_role_requirement_label}</p>
+                      ) : null}
+                    </TD>
+                    <TD className="py-2 text-xs text-app-secondary">
+                      {impact.amountLine ?? formatMoney(li.billing_rate_snapshot ?? li.srr_billing_rate)}
+                    </TD>
+                  </>
+                ) : (
+                  <>
+                    <TD className="py-2 text-sm">{li.headcount}</TD>
+                    <TD className="py-2 text-xs text-app-secondary">{li.wage_category_name ?? '-'}</TD>
+                    <TD className="py-2 text-xs text-app-secondary">
+                      {li.wage_min_requested ?? '-'} - {li.wage_max_requested ?? '-'}
+                    </TD>
+                    <TD className="py-2 text-xs text-app-secondary">{li.billing_rate_snapshot ?? '-'}</TD>
+                  </>
+                )}
+              </TR>
+            )
+          })}
         </TBody>
       </Table>
     </div>
@@ -543,7 +526,9 @@ export function WorkflowTaskDrawer({
             {tab === 'users' && isOnboardingTarget(detail.target) ?
               <UsersTabOnboarding ob={detail.target.client_onboarding} />
             : null}
-            {tab === 'line-items' && isMrfTarget(detail.target) ? <LineItemsTab items={detail.target.line_items} /> : null}
+            {tab === 'line-items' && isMrfTarget(detail.target) ? (
+              <LineItemsTab items={detail.target.line_items} billingType={detail.target.mrf.billing_type} />
+            ) : null}
             {tab === 'timeline' ? (
               <TimelineTab
                 steps={detail.workflow.steps}

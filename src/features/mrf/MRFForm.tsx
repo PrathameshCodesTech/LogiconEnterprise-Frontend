@@ -139,7 +139,15 @@ export function MRFForm({
     return isPastDate(values.required_by_date) ? 'Required by date cannot be in the past.' : null
   }, [values.required_by_date])
 
-  const clientFieldsError = useMemo(() => validateMrfClientFields(values), [values])
+  const isBillable = values.billing_type === 'billable'
+  const isNonBillable = values.billing_type === 'non_billable'
+  const clientFieldsError = useMemo(
+    () => (isNonBillable ? validateMrfClientFields(values) : null),
+    [values, isNonBillable],
+  )
+  const budgetHelperCopy = isBillable
+    ? 'Billable budgets are tied to client/site/department manpower.'
+    : 'Non-billable budgets are tied to internal department hiring.'
 
   const contextSig = `${values.site}|${values.billing_type}|${values.requesting_department}|${values.required_department}`
   const prevSigRef = useRef('')
@@ -154,6 +162,30 @@ export function MRFForm({
     () => siteOptions.find((s) => s.id === Number(values.site)),
     [siteOptions, values.site],
   )
+  const departmentOptionsForSelectedSite = useMemo(() => {
+    const siteId = Number(values.site)
+    if (!Number.isFinite(siteId) || siteId <= 0) return []
+    const clientId = selectedSite?.client
+    return departmentOptions.filter((dept) => {
+      if (dept.site != null) return Number(dept.site) === siteId
+      if (dept.client != null && clientId != null) return Number(dept.client) === Number(clientId)
+      return dept.client == null && dept.site == null
+    })
+  }, [departmentOptions, selectedSite?.client, values.site])
+
+  useEffect(() => {
+    const allowed = new Set(departmentOptionsForSelectedSite.map((d) => String(d.id)))
+    setValues((v) => {
+      const requestingInvalid = v.requesting_department && !allowed.has(v.requesting_department)
+      const requiredInvalid = v.required_department && !allowed.has(v.required_department)
+      if (!requestingInvalid && !requiredInvalid) return v
+      return {
+        ...v,
+        requesting_department: requestingInvalid ? '' : v.requesting_department,
+        required_department: requiredInvalid ? '' : v.required_department,
+      }
+    })
+  }, [departmentOptionsForSelectedSite])
 
   const [budgetRows, setBudgetRows] = useState<BudgetPlanRow[]>([])
   const [budgetLoading, setBudgetLoading] = useState(false)
@@ -239,72 +271,15 @@ export function MRFForm({
         <ErrorState message={`Department lookup failed. Department selects are disabled. ${departmentLookupError}`} />
       ) : null}
 
-      <Select
-        id="mrf_site"
-        label="Site"
-        value={values.site}
-        onChange={(e) => setValues((v) => ({ ...v, site: e.target.value }))}
-        disabled={submitting || !!lookupError}
-        error={siteError ?? undefined}
-      >
-        <option value="">Select a site...</option>
-        {siteOptions.map((s) => (
-          <option key={s.id} value={String(s.id)}>
-            {s.label}
-          </option>
-        ))}
-      </Select>
-
-      <div className="space-y-1">
-        <Select
-          id="mrf_requesting_department"
-          label="Requesting department"
-          value={values.requesting_department}
-          onChange={(e) => setValues((v) => ({ ...v, requesting_department: e.target.value }))}
-          disabled={deptSelectDisabled}
-        >
-          <option value="">None (backend uses your user department on create)</option>
-          {departmentOptions.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {optionLabel(o)}
-            </option>
-          ))}
-        </Select>
-        <p className="text-xs text-app-subtle">
-          Optional. If blank, backend uses your user department when creating.
-        </p>
-        {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments…</p> : null}
-      </div>
-
-      <div className="space-y-1">
-        <Select
-          id="mrf_required_department"
-          label="Required department"
-          value={values.required_department}
-          onChange={(e) => setValues((v) => ({ ...v, required_department: e.target.value }))}
-          disabled={deptSelectDisabled}
-        >
-          <option value="">None</option>
-          {departmentOptions.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {optionLabel(o)}
-            </option>
-          ))}
-        </Select>
-        <p className="text-xs text-app-subtle">
-          Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.
-        </p>
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2">
         <Select
-          id="mrf_requested_by_type"
-          label="Requested by type"
-          value={values.requested_by_type}
-          onChange={(e) => setValues((v) => ({ ...v, requested_by_type: e.target.value as RequestedByType }))}
+          id="mrf_billing_type"
+          label="Billing type"
+          value={values.billing_type}
+          onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
           disabled={submitting}
         >
-          {REQUESTER_TYPES.map((t) => (
+          {BILLING_TYPES.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
             </option>
@@ -325,29 +300,85 @@ export function MRFForm({
         </Select>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <p className="text-sm font-semibold text-app-text">
+        {isBillable ? 'Client manpower request' : 'Internal hiring request'}
+      </p>
+
+      <div className="space-y-1">
         <Select
-          id="mrf_billing_type"
-          label="Billing type"
-          value={values.billing_type}
-          onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
-          disabled={submitting}
+          id="mrf_site"
+          label="Site"
+          value={values.site}
+          onChange={(e) => setValues((v) => ({ ...v, site: e.target.value }))}
+          disabled={submitting || !!lookupError}
+          error={siteError ?? undefined}
         >
-          {BILLING_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
+          <option value="">Select a site...</option>
+          {siteOptions.map((s) => (
+            <option key={s.id} value={String(s.id)}>
+              {s.label}
             </option>
           ))}
         </Select>
-        <Input
-          id="mrf_department_legacy"
-          label="Legacy department text / remarks"
-          value={values.department}
-          onChange={(e) => setValues((v) => ({ ...v, department: e.target.value }))}
-          disabled={submitting}
-          placeholder="Optional free-text department note"
-        />
+        {isNonBillable ? (
+          <p className="text-xs text-app-subtle">Site/cost center associated with the internal request.</p>
+        ) : null}
       </div>
+
+      <div className="space-y-1">
+        <Select
+          id="mrf_requesting_department"
+          label="Requesting department"
+          value={values.requesting_department}
+          onChange={(e) => setValues((v) => ({ ...v, requesting_department: e.target.value }))}
+          disabled={deptSelectDisabled}
+        >
+          <option value="">None (backend uses your user department on create)</option>
+          {departmentOptionsForSelectedSite.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {optionLabel(o)}
+            </option>
+          ))}
+        </Select>
+        <p className="text-xs text-app-subtle">
+          Optional. If blank, backend uses your user department when creating.
+        </p>
+        {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments…</p> : null}
+      </div>
+
+      <div className="space-y-1">
+        <Select
+          id="mrf_required_department"
+          label="Required department"
+          value={values.required_department}
+          onChange={(e) => setValues((v) => ({ ...v, required_department: e.target.value }))}
+          disabled={deptSelectDisabled}
+        >
+          <option value="">None</option>
+          {departmentOptionsForSelectedSite.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {optionLabel(o)}
+            </option>
+          ))}
+        </Select>
+        <p className="text-xs text-app-subtle">
+          Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.
+        </p>
+      </div>
+
+      <Select
+        id="mrf_requested_by_type"
+        label="Requested by type"
+        value={values.requested_by_type}
+        onChange={(e) => setValues((v) => ({ ...v, requested_by_type: e.target.value as RequestedByType }))}
+        disabled={submitting}
+      >
+        {REQUESTER_TYPES.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
 
       {!canReadBudget && initialMRF?.budget_plan != null && (initialMRF.budget_plan_name || initialMRF.budget_plan_code) ? (
         <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm text-app-secondary">
@@ -380,14 +411,14 @@ export function MRFForm({
           ) : null}
           <Select
             id="mrf_budget_plan"
-            label="Budget plan (optional)"
+            label={isBillable ? 'Budget plan' : 'Non-billable budget plan'}
             value={values.budget_plan}
             onChange={(e) => setValues((v) => ({ ...v, budget_plan: e.target.value }))}
             disabled={
               submitting ||
               budgetLoading ||
               !!budgetLookupError ||
-              (values.billing_type === 'billable' &&
+              (isBillable &&
                 (!values.site.trim() || selectedSite?.client == null || !Number.isFinite(Number(selectedSite.client))))
             }
           >
@@ -404,6 +435,7 @@ export function MRFForm({
               </option>
             ))}
           </Select>
+          <p className="text-xs text-app-subtle">{budgetHelperCopy}</p>
         </>
       ) : null}
 
@@ -438,6 +470,7 @@ export function MRFForm({
         onSupportChange={(patch) => setValues((v) => ({ ...v, support: { ...v.support, ...patch } }))}
         submitting={submitting}
         clientError={clientFieldsError}
+        billingType={values.billing_type}
       />
 
       <div className="space-y-1">

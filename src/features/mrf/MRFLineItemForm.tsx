@@ -2,6 +2,7 @@
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { ErrorState } from '@/components/ui/ErrorState'
+import type { SiteRoleRequirementRow } from '@/api/siteRoleRequirements'
 import type { BudgetPlanRow } from '@/features/budgets/types'
 import { budgetNatureLabel, formatBudgetAmount } from '@/features/budgets/types'
 import {
@@ -9,6 +10,7 @@ import {
   loadBillableBudgetOptionsForSite,
   loadNonBillableBudgetOptionsForDepartments,
 } from '@/features/budgets/budgetLookup'
+import { availableHeadcountForEdit, formatSrrOptionLabel } from '@/features/mrf/mrfSrrDisplay'
 import type { MRFLineItemRow, MRFLineItemWriteInput, MRFRow } from '@/features/mrf/types'
 import type { SiteOption } from '@/features/mrf/MRFForm'
 
@@ -50,7 +52,7 @@ export function MRFLineItemForm({
   errorMessage,
   onSubmit,
   jobRoleOptions,
-  siteRoleRequirementOptions,
+  srrRows,
   wageCategoryOptions,
   lookupError,
 }: {
@@ -63,10 +65,12 @@ export function MRFLineItemForm({
   errorMessage?: string | null
   onSubmit: (payload: MRFLineItemWriteInput) => void | Promise<void>
   jobRoleOptions: Option[]
-  siteRoleRequirementOptions: Option[]
+  srrRows: SiteRoleRequirementRow[]
   wageCategoryOptions: Option[]
   lookupError: string | null
 }) {
+  const isBillable = String(parentMrf.billing_type) === 'billable'
+
   const [values, setValues] = useState<MRFLineItemFormValues>(() => ({
     job_role: initial?.job_role != null ? String(initial.job_role) : '',
     site_role_requirement: initial?.site_role_requirement != null ? String(initial.site_role_requirement) : '',
@@ -86,7 +90,7 @@ export function MRFLineItemForm({
   const prevParentRef = useRef('')
   useEffect(() => {
     if (prevParentRef.current && prevParentRef.current !== parentCtx) {
-      setValues((v) => ({ ...v, budget_plan: '' }))
+      setValues((v) => ({ ...v, budget_plan: '', site_role_requirement: '' }))
     }
     prevParentRef.current = parentCtx
   }, [parentCtx])
@@ -95,6 +99,34 @@ export function MRFLineItemForm({
     () => siteOptions.find((s) => s.id === Number(parentMrf.site)),
     [siteOptions, parentMrf.site],
   )
+
+  const selectedSrr = useMemo(
+    () => srrRows.find((s) => s.id === Number(values.site_role_requirement)),
+    [srrRows, values.site_role_requirement],
+  )
+
+  const srrLocked = isBillable && Boolean(values.site_role_requirement)
+
+  function applySrrSelection(srrId: string) {
+    if (!srrId) {
+      setValues((v) => ({ ...v, site_role_requirement: '' }))
+      return
+    }
+    const srr = srrRows.find((s) => s.id === Number(srrId))
+    if (!srr) {
+      setValues((v) => ({ ...v, site_role_requirement: srrId }))
+      return
+    }
+    setValues((v) => ({
+      ...v,
+      site_role_requirement: srrId,
+      job_role: String(srr.job_role),
+      wage_category: srr.wage_category != null ? String(srr.wage_category) : '',
+      wage_min_requested: srr.wage_min ?? '',
+      wage_max_requested: srr.wage_max ?? '',
+      billing_rate_snapshot: srr.billing_rate ?? '',
+    }))
+  }
 
   const [budgetRows, setBudgetRows] = useState<BudgetPlanRow[]>([])
   const [budgetLoading, setBudgetLoading] = useState(false)
@@ -164,11 +196,42 @@ export function MRFLineItemForm({
     selectedSite?.client,
   ])
 
+  const headcountNum = Number(values.headcount)
+  const approvedHeadcount = selectedSrr?.approved_headcount ?? initial?.srr_approved_headcount ?? null
+  const remainingHeadcount = useMemo(() => {
+    if (initial && values.site_role_requirement === String(initial.site_role_requirement ?? '')) {
+      return availableHeadcountForEdit(initial)
+    }
+    return selectedSrr?.approved_headcount ?? null
+  }, [initial, selectedSrr, values.site_role_requirement])
+
   const headcountError = useMemo(() => {
-    const n = Number(values.headcount)
-    if (!Number.isFinite(n) || n < 1) return 'Headcount must be at least 1.'
+    if (!Number.isFinite(headcountNum) || headcountNum < 1) return 'Headcount must be at least 1.'
+    if (
+      isBillable &&
+      remainingHeadcount != null &&
+      Number.isFinite(remainingHeadcount) &&
+      headcountNum > remainingHeadcount
+    ) {
+      return `Requested headcount (${headcountNum}) exceeds remaining (${remainingHeadcount}).`
+    }
     return null
-  }, [values.headcount])
+  }, [headcountNum, isBillable, remainingHeadcount])
+
+  const srrRequiredError = useMemo(() => {
+    if (isBillable && !values.site_role_requirement) {
+      return 'Select an approved site role requirement for this billable MRF.'
+    }
+    return null
+  }, [isBillable, values.site_role_requirement])
+
+  const srrWageWarning = useMemo(() => {
+    if (!isBillable || !selectedSrr) return null
+    if (!selectedSrr.wage_category && !selectedSrr.wage_min && !selectedSrr.wage_max) {
+      return 'This site role has no wage category or wage range configured. Enter values manually or update the SRR.'
+    }
+    return null
+  }, [isBillable, selectedSrr])
 
   const wageRangeError = useMemo(() => {
     const min = toNumberOrNull(values.wage_min_requested)
@@ -178,21 +241,29 @@ export function MRFLineItemForm({
   }, [values.wage_min_requested, values.wage_max_requested])
 
   const budgetRangeError = useMemo(() => {
+    if (isBillable) return null
     const min = toNumberOrNull(values.budget_min)
     const max = toNumberOrNull(values.budget_max)
     if (min != null && max != null && min > max) return 'Budget min cannot exceed budget max.'
     return null
-  }, [values.budget_min, values.budget_max])
+  }, [isBillable, values.budget_min, values.budget_max])
 
   const jobRoleError = useMemo(() => (values.job_role ? null : 'Job role is required.'), [values.job_role])
 
-  const canSubmit = !submitting && !lookupError && !headcountError && !wageRangeError && !budgetRangeError && !jobRoleError
+  const canSubmit =
+    !submitting &&
+    !lookupError &&
+    !headcountError &&
+    !srrRequiredError &&
+    !wageRangeError &&
+    !budgetRangeError &&
+    !jobRoleError
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
     const payload: MRFLineItemWriteInput = {
-      mrf: 0, // injected by parent
+      mrf: 0,
       job_role: Number(values.job_role),
       site_role_requirement: values.site_role_requirement ? Number(values.site_role_requirement) : null,
       headcount: Number(values.headcount),
@@ -205,8 +276,8 @@ export function MRFLineItemForm({
       wage_min_requested: toNumberOrNull(values.wage_min_requested),
       wage_max_requested: toNumberOrNull(values.wage_max_requested),
       billing_rate_snapshot: toNumberOrNull(values.billing_rate_snapshot),
-      budget_min: toNumberOrNull(values.budget_min),
-      budget_max: toNumberOrNull(values.budget_max),
+      budget_min: isBillable ? null : toNumberOrNull(values.budget_min),
+      budget_max: isBillable ? null : toNumberOrNull(values.budget_max),
     }
     const bpTrim = values.budget_plan.trim()
     if (initial) {
@@ -219,60 +290,149 @@ export function MRFLineItemForm({
   }
 
   const mrfHasBudget = parentMrf.budget_plan != null && parentMrf.budget_plan > 0
-  const billable = String(parentMrf.billing_type) === 'billable'
+  const billable = isBillable
   const budgetSelectDisabled =
     submitting ||
     budgetLoading ||
     !!budgetLookupError ||
     (billable && (!Number.isFinite(Number(parentMrf.site)) || selectedSite?.client == null))
 
+  const roleFieldsDisabled = submitting || !!lookupError || (isBillable && srrLocked)
+
   return (
     <form id={formId} onSubmit={handleSubmit} className="space-y-4">
       {errorMessage ? <ErrorState message={errorMessage} /> : null}
       {lookupError ? <ErrorState message={`Lookup failed. Add/Edit is disabled. ${lookupError}`} /> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {isBillable ? (
+        <>
+          <div className="rounded-panel border border-brand-500/30 bg-brand-500/5 p-3 text-xs text-app-secondary">
+            <p className="font-medium text-app-text">Billable line item</p>
+            <p className="mt-1">
+              Select an approved site role requirement for this site
+              {parentMrf.required_department_name
+                ? ` and department (${parentMrf.required_department_name})`
+                : parentMrf.required_department
+                  ? ` and department #${parentMrf.required_department}`
+                  : ''}
+              . Role, wage, and billing defaults come from the SRR.
+            </p>
+            {!parentMrf.required_department ? (
+              <p className="mt-2 text-status-warning">
+                No required department on this MRF — only site-level SRRs are shown.
+              </p>
+            ) : null}
+          </div>
+
+          <Select
+            id="mrf_li_srr"
+            label="Site role requirement"
+            value={values.site_role_requirement}
+            onChange={(e) => applySrrSelection(e.target.value)}
+            disabled={submitting || !!lookupError}
+            error={srrRequiredError ?? undefined}
+          >
+            <option value="">
+              {srrRows.length === 0 ? 'No matching SRRs for this site/department' : 'Select approved role…'}
+            </option>
+            {srrRows.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {formatSrrOptionLabel(s)}
+              </option>
+            ))}
+          </Select>
+          {selectedSrr?.location_area_name ? (
+            <p className="text-xs text-app-subtle">Location: {selectedSrr.location_area_name}</p>
+          ) : null}
+          {srrWageWarning ? <p className="text-xs text-status-warning">{srrWageWarning}</p> : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Input
+                id="mrf_li_headcount"
+                label="Headcount"
+                value={values.headcount}
+                onChange={(e) => setValues((v) => ({ ...v, headcount: e.target.value }))}
+                disabled={submitting}
+                inputMode="numeric"
+                error={headcountError ?? undefined}
+              />
+              {approvedHeadcount != null ? (
+                <p className="text-xs text-app-subtle">
+                  SRR approved: {approvedHeadcount}
+                  {remainingHeadcount != null ? ` · Available for this line: ${remainingHeadcount}` : null}
+                  {!initial && selectedSrr ? (
+                    <span className="block text-app-subtle">
+                      Remaining across other active MRFs is validated on save.
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+
+            <Select
+              id="mrf_li_job_role"
+              label="Job role"
+              value={values.job_role}
+              onChange={(e) => setValues((v) => ({ ...v, job_role: e.target.value }))}
+              disabled={roleFieldsDisabled}
+              error={jobRoleError ?? undefined}
+            >
+              <option value="">Select...</option>
+              {jobRoleOptions.map((o) => (
+                <option key={o.id} value={String(o.id)}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
+            id="mrf_li_job_role"
+            label="Job role"
+            value={values.job_role}
+            onChange={(e) => setValues((v) => ({ ...v, job_role: e.target.value }))}
+            disabled={submitting || !!lookupError}
+            error={jobRoleError ?? undefined}
+          >
+            <option value="">Select...</option>
+            {jobRoleOptions.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+
+          <Input
+            id="mrf_li_headcount"
+            label="Headcount"
+            value={values.headcount}
+            onChange={(e) => setValues((v) => ({ ...v, headcount: e.target.value }))}
+            disabled={submitting}
+            inputMode="numeric"
+            error={headcountError ?? undefined}
+          />
+        </div>
+      )}
+
+      {!isBillable ? (
         <Select
-          id="mrf_li_job_role"
-          label="Job role"
-          value={values.job_role}
-          onChange={(e) => setValues((v) => ({ ...v, job_role: e.target.value }))}
+          id="mrf_li_srr"
+          label="Site role requirement (optional)"
+          value={values.site_role_requirement}
+          onChange={(e) => setValues((v) => ({ ...v, site_role_requirement: e.target.value }))}
           disabled={submitting || !!lookupError}
-          error={jobRoleError ?? undefined}
         >
-          <option value="">Select...</option>
-          {jobRoleOptions.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {o.label}
+          <option value="">None</option>
+          {srrRows.map((s) => (
+            <option key={s.id} value={String(s.id)}>
+              {formatSrrOptionLabel(s)}
             </option>
           ))}
         </Select>
-
-        <Input
-          id="mrf_li_headcount"
-          label="Headcount"
-          value={values.headcount}
-          onChange={(e) => setValues((v) => ({ ...v, headcount: e.target.value }))}
-          disabled={submitting}
-          inputMode="numeric"
-          error={headcountError ?? undefined}
-        />
-      </div>
-
-      <Select
-        id="mrf_li_srr"
-        label="Site role requirement"
-        value={values.site_role_requirement}
-        onChange={(e) => setValues((v) => ({ ...v, site_role_requirement: e.target.value }))}
-        disabled={submitting || !!lookupError}
-      >
-        <option value="">None</option>
-        {siteRoleRequirementOptions.map((o) => (
-          <option key={o.id} value={String(o.id)}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
+      ) : null}
 
       <Input
         id="mrf_li_replacement_for"
@@ -297,7 +457,7 @@ export function MRFLineItemForm({
         label="Wage category"
         value={values.wage_category}
         onChange={(e) => setValues((v) => ({ ...v, wage_category: e.target.value }))}
-        disabled={submitting || !!lookupError}
+        disabled={roleFieldsDisabled}
       >
         <option value="">None</option>
         {wageCategoryOptions.map((o) => (
@@ -313,7 +473,7 @@ export function MRFLineItemForm({
           label="Wage min requested"
           value={values.wage_min_requested}
           onChange={(e) => setValues((v) => ({ ...v, wage_min_requested: e.target.value }))}
-          disabled={submitting}
+          disabled={submitting || (isBillable && srrLocked)}
           inputMode="decimal"
           error={wageRangeError ?? undefined}
         />
@@ -322,7 +482,7 @@ export function MRFLineItemForm({
           label="Wage max requested"
           value={values.wage_max_requested}
           onChange={(e) => setValues((v) => ({ ...v, wage_max_requested: e.target.value }))}
-          disabled={submitting}
+          disabled={submitting || (isBillable && srrLocked)}
           inputMode="decimal"
         />
       </div>
@@ -333,31 +493,33 @@ export function MRFLineItemForm({
           label="Billing rate snapshot"
           value={values.billing_rate_snapshot}
           onChange={(e) => setValues((v) => ({ ...v, billing_rate_snapshot: e.target.value }))}
-          disabled={submitting}
+          disabled={submitting || (isBillable && srrLocked)}
           inputMode="decimal"
         />
         <div />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Input
-          id="mrf_li_budget_min"
-          label="Budget min"
-          value={values.budget_min}
-          onChange={(e) => setValues((v) => ({ ...v, budget_min: e.target.value }))}
-          disabled={submitting}
-          inputMode="decimal"
-          error={budgetRangeError ?? undefined}
-        />
-        <Input
-          id="mrf_li_budget_max"
-          label="Budget max"
-          value={values.budget_max}
-          onChange={(e) => setValues((v) => ({ ...v, budget_max: e.target.value }))}
-          disabled={submitting}
-          inputMode="decimal"
-        />
-      </div>
+      {!isBillable ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            id="mrf_li_budget_min"
+            label="Budget min"
+            value={values.budget_min}
+            onChange={(e) => setValues((v) => ({ ...v, budget_min: e.target.value }))}
+            disabled={submitting}
+            inputMode="decimal"
+            error={budgetRangeError ?? undefined}
+          />
+          <Input
+            id="mrf_li_budget_max"
+            label="Budget max"
+            value={values.budget_max}
+            onChange={(e) => setValues((v) => ({ ...v, budget_max: e.target.value }))}
+            disabled={submitting}
+            inputMode="decimal"
+          />
+        </div>
+      ) : null}
 
       {!canReadBudget && initial?.budget_plan != null && (initial.budget_plan_name || initial.budget_plan_code) ? (
         <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm text-app-secondary">

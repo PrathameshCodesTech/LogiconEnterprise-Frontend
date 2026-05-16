@@ -2,7 +2,7 @@
 import axios from 'axios'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
-import { deleteMRF, getMRF, updateMRF } from '@/api/mrf'
+import { deleteMRF, getMRF, getMRFReadiness, updateMRF } from '@/api/mrf'
 import { departmentToFormOption, listDepartments, type DepartmentOption, type DepartmentRow } from '@/api/departments'
 import {
   getMRFWorkflowConfigCheck,
@@ -24,14 +24,10 @@ import { MRFForm, mrfFormValuesToWritePayload, type MRFFormValues, type SiteOpti
 import { MRFLineItemsTable } from '@/features/mrf/MRFLineItemsTable'
 import { MRFClientFormDisplay } from '@/features/mrf/MRFClientFormDisplay'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
-import type { MRFRow } from '@/features/mrf/types'
-import {
-  budgetReservationStatusLabel,
-  budgetReservationStatusVariant,
-  formatMoneyAmount,
-  mrfBudgetReservationWorkflowNote,
-} from '@/features/budgets/budgetDisplay'
-import { budgetNatureLabel, formatBudgetAmount } from '@/features/budgets/types'
+import { MRFReadinessPanel } from '@/features/mrf/MRFReadinessPanel'
+import { formatMrfWorkflowStartError, normalizeMrfReadiness } from '@/features/mrf/mrfReadiness'
+import type { MRFReadinessResponse, MRFRow } from '@/features/mrf/types'
+import { MRFBudgetImpactPanel, mrfReservationStatusCopy } from '@/features/mrf/mrfBudgetContext'
 import { WorkflowActionBox } from '@/features/workflow/WorkflowActionBox'
 import { WorkflowConfigCheckDrawer } from '@/features/workflow/WorkflowConfigCheckDrawer'
 import { WorkflowReassignDrawer } from '@/features/workflow/WorkflowReassignDrawer'
@@ -111,26 +107,33 @@ export function MRFDetailPage() {
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null)
   const [startInlineError, setStartInlineError] = useState<string | null>(null)
 
+  const [readiness, setReadiness] = useState<MRFReadinessResponse | null>(null)
+  const [readinessLoading, setReadinessLoading] = useState(false)
+  const [readinessError, setReadinessError] = useState<string | null>(null)
+  const [lineItemsVersion, setLineItemsVersion] = useState(0)
+  const [lineItemsOpenCreate, setLineItemsOpenCreate] = useState(false)
+
   const selectedRoute = useMemo(
     () => availableRoutes.find((r) => r.id === selectedRouteId) ?? null,
     [availableRoutes, selectedRouteId],
   )
+
+  const isWorkflowNotStarted = !row?.workflow_status || row.workflow_status === 'not_started'
+  const isReadyForApproval = readiness?.ok === true
+  const showApprovalWorkflow = !isWorkflowNotStarted || isReadyForApproval
 
   const startDisabledByRoutes =
     routesLoading ||
     !!routesError ||
     (availableRoutes.length > 0 && (selectedRouteId == null || selectedRoute?.ok === false))
 
-  const budgetWorkflowNote = useMemo(() => {
-    if (!row) return null
-    const hasBudgetPlan =
-      row.budget_plan != null && !!(row.budget_plan_name?.trim() || row.budget_plan_code?.trim())
-    return mrfBudgetReservationWorkflowNote(
-      row.workflow_status != null ? String(row.workflow_status) : undefined,
-      hasBudgetPlan,
-      row.budget_reservation_status,
-    )
-  }, [row])
+  const startDisabledByReadiness =
+    isWorkflowNotStarted && (!isReadyForApproval || readinessLoading || !!readinessError)
+
+  const budgetReservationCopy = useMemo(
+    () => (row ? mrfReservationStatusCopy(row, row.workflow_status) : null),
+    [row],
+  )
 
   const loadWorkflowInstance = useCallback(async (instanceId: number) => {
     if (!canWorkflowRead) {
@@ -151,12 +154,30 @@ export function MRFDetailPage() {
     }
   }, [canWorkflowRead])
 
+  const loadReadiness = useCallback(
+    async (mrfRow: MRFRow) => {
+      setReadinessLoading(true)
+      setReadinessError(null)
+      try {
+        const raw = await getMRFReadiness(mrfId)
+        setReadiness(normalizeMrfReadiness(raw, mrfRow))
+      } catch (e: unknown) {
+        setReadiness(null)
+        setReadinessError(parseApiError(e, 'Failed to load MRF readiness').message)
+      } finally {
+        setReadinessLoading(false)
+      }
+    },
+    [mrfId],
+  )
+
   async function refresh() {
     setLoading(true)
     setError(null)
     try {
       const res = await getMRF(mrfId)
       setRow(res)
+      void loadReadiness(res)
     } catch (e: unknown) {
       setRow(null)
       setError(parseApiError(e, 'Failed to load MRF').message)
@@ -169,6 +190,7 @@ export function MRFDetailPage() {
     try {
       const res = await getMRF(mrfId)
       setRow(res)
+      await loadReadiness(res)
       if (canWorkflowRead && res.workflow_instance_id != null && res.workflow_instance_id > 0) {
         await loadWorkflowInstance(res.workflow_instance_id)
       } else {
@@ -178,6 +200,11 @@ export function MRFDetailPage() {
     } catch (e: unknown) {
       setWfInstanceError(parseApiError(e, 'Failed to reload MRF').message)
     }
+  }
+
+  function handleLineItemsChanged() {
+    setLineItemsVersion((v) => v + 1)
+    if (row) void loadReadiness(row)
   }
 
   async function handleCheckConfig() {
@@ -197,6 +224,22 @@ export function MRFDetailPage() {
 
   async function handleStartWorkflow() {
     setStartInlineError(null)
+    let readyNow = readiness?.ok === true
+    if (row) {
+      try {
+        const raw = await getMRFReadiness(mrfId)
+        const normalized = normalizeMrfReadiness(raw, row)
+        setReadiness(normalized)
+        readyNow = normalized.ok
+      } catch {
+        setStartInlineError('Could not verify MRF readiness. Try again.')
+        return
+      }
+    }
+    if (!readyNow) {
+      setStartInlineError('MRF is not ready for approval. Complete setup items below.')
+      return
+    }
     if (availableRoutes.length > 0) {
       if (selectedRouteId == null) {
         setStartInlineError('Select an approval route before sending for approval.')
@@ -214,7 +257,7 @@ export function MRFDetailPage() {
       await startMRFWorkflow(mrfId, routeArg ?? undefined)
       await reloadMrfAndWorkflow()
     } catch (e: unknown) {
-      setStartInlineError(parseApiError(e, 'Send for approval failed').message)
+      setStartInlineError(formatMrfWorkflowStartError(e))
     } finally {
       setStartBusy(false)
     }
@@ -333,6 +376,11 @@ export function MRFDetailPage() {
     }
   }, [row, row?.site, canWorkflowStart, siteRowForMrf?.client])
 
+  useEffect(() => {
+    if (!row) return
+    void loadReadiness(row)
+  }, [row?.id, row?.budget_plan, row?.billing_type, lineItemsVersion, loadReadiness])
+
   function openEdit() {
     if (!canUpdate) return
     setFormError(null)
@@ -352,6 +400,7 @@ export function MRFDetailPage() {
     try {
       const updated = await updateMRF(row.id, mrfFormValuesToWritePayload(values, 'edit'))
       setRow(updated)
+      await loadReadiness(updated)
       closeDrawer()
     } catch (e: unknown) {
       setFormError(parseApiError(e, 'Save failed').message)
@@ -445,62 +494,31 @@ export function MRFDetailPage() {
               <dt className="text-app-subtle">Requesting department</dt>
               <dd className="max-w-[60%] text-right font-medium text-app-text">
                 {row.requesting_department_name?.trim() ||
-                  (row.requesting_department != null ? `#${row.requesting_department}` : '—')}
+                  (row.requesting_department != null ? `#${row.requesting_department}` : '�')}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Required department</dt>
               <dd className="max-w-[60%] text-right font-medium text-app-text">
                 {row.required_department_name?.trim() ||
-                  (row.required_department != null ? `#${row.required_department}` : '—')}
+                  (row.required_department != null ? `#${row.required_department}` : '�')}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Legacy department text</dt>
-              <dd className="max-w-[60%] text-right text-app-text">{row.department?.trim() ? row.department : '—'}</dd>
+              <dd className="max-w-[60%] text-right text-app-text">{row.department?.trim() ? row.department : '�'}</dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Required by</dt>
               <dd className="font-medium text-app-text">{row.required_by_date || '-'}</dd>
             </div>
             <div className="flex items-start justify-between gap-3 border-t border-app-border pt-2">
-              <dt className="text-app-subtle shrink-0">Budget plan</dt>
+              <dt className="text-app-subtle shrink-0">Budget status</dt>
               <dd className="max-w-[60%] text-right text-sm text-app-text">
-                {row.budget_plan != null && (row.budget_plan_name || row.budget_plan_code) ? (
-                  <div className="space-y-2">
-                    <p className="font-medium">
-                      {row.budget_plan_name ?? 'Budget'}{' '}
-                      {row.budget_plan_code ? (
-                        <span className="font-mono text-xs text-app-secondary">({row.budget_plan_code})</span>
-                      ) : null}
-                    </p>
-                    <div className="flex justify-end">
-                      <Badge variant={budgetReservationStatusVariant(row.budget_reservation_status)}>
-                        {budgetReservationStatusLabel(row.budget_reservation_status)}
-                      </Badge>
-                    </div>
-                    {row.budget_plan_nature ? (
-                      <p className="text-xs text-app-secondary">Nature: {budgetNatureLabel(String(row.budget_plan_nature))}</p>
-                    ) : null}
-                    {row.budget_plan_amount != null ? (
-                      <p className="text-xs text-app-secondary">
-                        Plan total: {formatBudgetAmount(String(row.budget_plan_amount), row.budget_plan_currency ?? 'INR')} —{' '}
-                        {row.budget_plan_status ?? '—'}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-app-secondary">{row.budget_plan_status ?? '—'}</p>
-                    )}
-                    <p className="text-xs text-app-secondary">
-                      Reserved budget:{' '}
-                      {formatMoneyAmount(row.budget_reserved_amount ?? null, row.budget_plan_currency ?? 'INR')}
-                    </p>
-                    <p className="text-xs text-app-secondary">
-                      Committed budget:{' '}
-                      {formatMoneyAmount(row.budget_committed_amount ?? null, row.budget_plan_currency ?? 'INR')}
-                    </p>
-                  </div>
+                {budgetReservationCopy ? (
+                  <Badge variant={budgetReservationCopy.variant}>{budgetReservationCopy.label}</Badge>
                 ) : (
-                  <span className="text-app-secondary">No budget linked</span>
+                  <span className="text-app-secondary">—</span>
                 )}
               </dd>
             </div>
@@ -532,17 +550,50 @@ export function MRFDetailPage() {
         </div>
       </div>
 
+      <MRFLineItemsTable
+        mrfId={row.id}
+        siteId={row.site}
+        parentMrf={row}
+        siteOptions={siteOptions}
+        readinessLineItems={readiness?.line_items}
+        onChanged={handleLineItemsChanged}
+        openCreateSignal={lineItemsOpenCreate}
+        onOpenCreateHandled={() => setLineItemsOpenCreate(false)}
+      />
+
       <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
         <p className="text-sm font-semibold text-app-text">Approval workflow</p>
-        <p className="mt-1 text-xs text-app-secondary">
-          Choose an approval route, then send for approval. Use setup check if you need to verify assignments first.
-        </p>
-        {budgetWorkflowNote ? (
-          <p className="mt-3 rounded-panel border border-app-border bg-app-muted px-3 py-2 text-xs text-app-secondary">
-            {budgetWorkflowNote}
+        {isWorkflowNotStarted ? (
+          <p className="mt-1 text-xs text-app-secondary">
+            {isReadyForApproval
+              ? 'MRF setup is complete. Choose an approval route and send for approval.'
+              : 'Approval workflow appears after MRF setup is complete.'}
           </p>
-        ) : null}
-        {row.workflow_status === 'not_started' && canWorkflowStart ? (
+        ) : (
+          <p className="mt-1 text-xs text-app-secondary">Track approval progress and act on the current step.</p>
+        )}
+        <div className="mt-4">
+          <MRFBudgetImpactPanel
+            source={row}
+            workflowStatus={row.workflow_status}
+            clientName={undefined}
+            siteName={siteNameById.get(row.site) ?? siteRowForMrf?.name}
+            departmentName={row.required_department_name}
+          />
+        </div>
+
+        <div className="mt-4">
+          <MRFReadinessPanel
+            readiness={readiness}
+            loading={readinessLoading}
+            error={readinessError}
+            mrf={row}
+            compact={isReadyForApproval && isWorkflowNotStarted}
+            onAddLineItem={canUpdate ? () => setLineItemsOpenCreate(true) : undefined}
+          />
+        </div>
+
+        {showApprovalWorkflow && isWorkflowNotStarted && canWorkflowStart ? (
           <div className="mt-4 space-y-3">
             <ApprovalRouteSelector
               routes={availableRoutes}
@@ -562,24 +613,26 @@ export function MRFDetailPage() {
             <ErrorState message={startInlineError} />
           </div>
         ) : null}
-        <div className="mt-4 border-t border-app-border pt-4">
-          <WorkflowStatusPanel
-            workflowStatus={row.workflow_status}
-            workflowInstanceId={row.workflow_instance_id}
-            workflowCurrentStepCode={row.workflow_current_step_code}
-            workflowCurrentStepName={row.workflow_current_step_name}
-            workflowCurrentAssignedUserName={row.workflow_current_assigned_user_name}
-            workflowCurrentDepartmentName={row.workflow_current_department_name}
-            canConfigCheck={canConfigCheck}
-            canStart={canWorkflowStart}
-            checkingConfig={configBusy}
-            starting={startBusy}
-            onCheckConfig={() => void handleCheckConfig()}
-            onStartWorkflow={() => void handleStartWorkflow()}
-            startButtonLabel="Send for approval"
-            startDisabled={startDisabledByRoutes}
-          />
-        </div>
+        {showApprovalWorkflow || !isWorkflowNotStarted ? (
+          <div className="mt-4 border-t border-app-border pt-4">
+            <WorkflowStatusPanel
+              workflowStatus={row.workflow_status}
+              workflowInstanceId={row.workflow_instance_id}
+              workflowCurrentStepCode={row.workflow_current_step_code}
+              workflowCurrentStepName={row.workflow_current_step_name}
+              workflowCurrentAssignedUserName={row.workflow_current_assigned_user_name}
+              workflowCurrentDepartmentName={row.workflow_current_department_name}
+              canConfigCheck={canConfigCheck}
+              canStart={canWorkflowStart && isReadyForApproval}
+              checkingConfig={configBusy}
+              starting={startBusy}
+              onCheckConfig={() => void handleCheckConfig()}
+              onStartWorkflow={() => void handleStartWorkflow()}
+              startButtonLabel="Send for approval"
+              startDisabled={startDisabledByRoutes || startDisabledByReadiness}
+            />
+          </div>
+        ) : null}
 
         {canWorkflowReassign &&
         row.workflow_status === 'active' &&
@@ -624,8 +677,6 @@ export function MRFDetailPage() {
           </div>
         ) : null}
       </section>
-
-      <MRFLineItemsTable mrfId={row.id} siteId={row.site} parentMrf={row} siteOptions={siteOptions} />
 
       <WorkflowConfigCheckDrawer
         open={configDrawerOpen}

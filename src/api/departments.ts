@@ -18,6 +18,8 @@ export interface DepartmentOption {
   id: number
   label: string
   scopeLabel?: string
+  client?: number | null
+  site?: number | null
 }
 
 export function departmentToFormOption(d: DepartmentRow): DepartmentOption {
@@ -35,6 +37,8 @@ export function departmentToFormOption(d: DepartmentRow): DepartmentOption {
     id: d.id,
     label: `${d.name} (${d.code})`,
     scopeLabel: scope,
+    client: d.client,
+    site: d.site,
   }
 }
 

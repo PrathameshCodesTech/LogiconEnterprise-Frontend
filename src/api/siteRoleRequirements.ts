@@ -6,7 +6,13 @@ export type BillingType = 'billable' | 'non_billable'
 export interface SiteRoleRequirementRow {
   id: number
   site: number
+  department: number | null
+  department_name: string | null
+  department_code: string | null
+  site_name: string | null
   job_role: number
+  job_role_name: string | null
+  job_role_code: string | null
   approved_headcount: number
   billing_type: BillingType
   billing_rate: string | null
@@ -14,6 +20,9 @@ export interface SiteRoleRequirementRow {
   wage_max: string | null
   shift_hours: string | null
   wage_category: number | null
+  wage_category_name: string | null
+  wage_category_code: string | null
+  location_area_name: string | null
   effective_from: string
   effective_to: string | null
   is_active: boolean
@@ -29,6 +38,7 @@ export interface SiteRoleRequirementRow {
 export interface ListSiteRoleRequirementsParams {
   search?: string
   site?: number
+  department?: number
   job_role?: number
   is_active?: boolean
   billing_type?: BillingType
@@ -42,6 +52,7 @@ export async function listSiteRoleRequirements(params: ListSiteRoleRequirementsP
       params: {
         search: params.search || undefined,
         site: params.site ?? undefined,
+        department: params.department ?? undefined,
         job_role: params.job_role ?? undefined,
         is_active: typeof params.is_active === 'boolean' ? String(params.is_active) : undefined,
         billing_type: params.billing_type || undefined,

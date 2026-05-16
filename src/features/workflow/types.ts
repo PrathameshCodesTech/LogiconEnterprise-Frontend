@@ -199,6 +199,16 @@ export interface WorkflowTaskMRF {
   budget_reserved_amount?: string | null
   budget_committed_amount?: string | null
   budget_reservation_status?: string | null
+  resolved_budget_plan_id?: number | null
+  resolved_budget_plan_name?: string | null
+  resolved_budget_plan_code?: string | null
+  resolved_budget_scope?: string | null
+  resolved_budget_total_amount?: string | null
+  resolved_budget_reserved_amount?: string | null
+  resolved_budget_committed_amount?: string | null
+  resolved_budget_available_amount?: string | null
+  requested_budget_amount?: string | null
+  budget_after_request_available_amount?: string | null
 }
 
 export interface WorkflowTaskMRFLineItem {
@@ -207,10 +217,14 @@ export interface WorkflowTaskMRFLineItem {
   job_role_name: string | null
   headcount: number
   site_role_requirement: number | null
+  site_role_requirement_label?: string | null
+  srr_approved_headcount?: number | null
+  srr_remaining_headcount?: number | null
   wage_category_name: string | null
   wage_min_requested: string | null
   wage_max_requested: string | null
   billing_rate_snapshot: string | null
+  srr_billing_rate?: string | null
   budget_plan: number | null
   budget_plan_name: string | null
 }
