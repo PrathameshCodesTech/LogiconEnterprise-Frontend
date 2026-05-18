@@ -9,11 +9,17 @@ import type { WorkflowMyTask, WorkflowTaskClientOnboarding, WorkflowTaskOnboardi
 import { Badge } from '@/components/ui/Badge'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import {
+  ActionNudge,
+  TaskApprovalCard,
+  TaskInfoGrid,
+  TaskMetricTile,
+  TaskSummaryBand,
+} from '@/features/workflowTasks/TaskOverviewComponents'
+import {
   activeBadge,
   displayText,
   formatDate,
   formatMoney,
-  formatWhen,
   humanize,
 } from '@/features/workflowTasks/workflowTaskOnboardingViews'
 
@@ -32,46 +38,96 @@ function FieldBlock({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function OnboardingOverviewTab({ task, ob }: { task: WorkflowMyTask; ob: WorkflowTaskClientOnboarding }) {
+type ObBadgeVariant = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention'
+
+function obStatusVariant(s: string): ObBadgeVariant {
+  if (s === 'approved') return 'success'
+  if (s === 'rejected' || s === 'cancelled') return 'danger'
+  if (s === 'submitted') return 'info'
+  if (s === 'pending_review' || s === 'review' || s === 'in_review') return 'attention'
+  return 'neutral'
+}
+
+export function OnboardingOverviewTab({
+  task,
+  ob,
+  onGoToAction,
+}: {
+  task: WorkflowMyTask
+  ob: WorkflowTaskClientOnboarding
+  onGoToAction: () => void
+}) {
+  const isNewClient = ob.onboarding_type === 'new_client'
+  const clientDisplayName =
+    (isNewClient
+      ? ob.proposed_client_name?.trim()
+      : ob.client_name?.trim()) || '—'
+
+  const sitesCount = ob.proposed_sites?.length ?? 0
+  const deptsCount = ob.proposed_departments?.length ?? 0
+  const rolesCount = ob.proposed_role_requirements?.length ?? 0
+  const usersCount = ob.proposed_users?.length ?? 0
+
+  const statusLabel = humanize(ob.status)
+  const statusVariant = obStatusVariant(ob.status)
+  const finLabel = finalizationStatusLabel(ob.finalization_status)
+
   return (
-    <dl className="space-y-3 text-sm">
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Request</dt>
-        <dd className="mt-1 font-medium text-app-text">{task.target_title}</dd>
+    <div className="space-y-3">
+      {/* Summary band */}
+      <TaskSummaryBand
+        title={`Onboarding #${ob.id}`}
+        subtitle={clientDisplayName !== '—' ? clientDisplayName : null}
+        badges={
+          <>
+            <Badge variant="info">{task.step_name}</Badge>
+            <Badge variant={statusVariant}>{statusLabel}</Badge>
+            <Badge variant="neutral">{finLabel}</Badge>
+          </>
+        }
+      />
+
+      {/* Metric tiles */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <TaskMetricTile label="Proposed sites" value={sitesCount} />
+        <TaskMetricTile label="Departments" value={deptsCount} />
+        <TaskMetricTile label="Role requirements" value={rolesCount} />
+        <TaskMetricTile label="Users" value={usersCount} />
       </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Current approval</dt>
-        <dd className="mt-1 text-app-text">{task.step_name}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Assigned department</dt>
-        <dd className="mt-1 text-app-text">{task.assigned_department_name?.trim() || '-'}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Request status</dt>
-        <dd className="mt-1 text-app-text">{humanize(task.target_status)}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Onboarding type</dt>
-        <dd className="mt-1 text-app-text">{humanizeOnboardingType(ob.onboarding_type)}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Finalization status</dt>
-        <dd className="mt-1 text-app-text">{finalizationStatusLabel(ob.finalization_status)}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Expected sites count</dt>
-        <dd className="mt-1 text-app-text">{displayText(ob.expected_sites_count)}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Activated</dt>
-        <dd className="mt-1 text-app-secondary">{formatWhen(task.activated_at)}</dd>
-      </div>
-      <div>
-        <dt className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Due</dt>
-        <dd className="mt-1 text-app-secondary">{formatWhen(task.due_at)}</dd>
-      </div>
-    </dl>
+
+      {/* Current approval card */}
+      <TaskApprovalCard
+        stepName={task.step_name}
+        departmentName={task.assigned_department_name}
+        activatedAt={task.activated_at}
+        dueAt={task.due_at}
+      />
+
+      {/* Onboarding details grid */}
+      <TaskInfoGrid
+        title="Onboarding details"
+        rows={[
+          { label: 'Onboarding type', value: humanizeOnboardingType(ob.onboarding_type) },
+          { label: 'Client', value: clientDisplayName },
+          { label: 'Finalization', value: finLabel },
+          {
+            label: 'Status',
+            value: <Badge variant={statusVariant}>{statusLabel}</Badge>,
+          },
+          {
+            label: 'Expected sites',
+            value: ob.expected_sites_count != null ? String(ob.expected_sites_count) : '—',
+          },
+          {
+            label: 'Requested by',
+            value: ob.requested_by_username?.trim() || '—',
+          },
+        ]}
+      />
+
+      {/* Action nudge */}
+      <ActionNudge onGoToAction={onGoToAction} />
+    </div>
   )
 }
 
