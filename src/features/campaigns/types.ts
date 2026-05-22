@@ -26,6 +26,10 @@ export interface CampaignRow {
   default_language: LangCode
   enabled_languages: string[]
   campaign_roles: CampaignJobRoleRow[]
+  /** Phase Form-Builder-Frontend-B: optional reusable intake template. */
+  form_template?: number | null
+  form_template_name?: string | null
+  form_template_code?: string | null
   created_at: string
   updated_at: string
 }
@@ -43,6 +47,8 @@ export interface CampaignWriteInput {
   shuffle_fields?: boolean
   default_language?: string
   enabled_languages?: string[]
+  /** Phase Form-Builder-Frontend-B: optional reusable intake template. */
+  form_template?: number | null
 }
 
 export interface CampaignJobRoleWriteInput {

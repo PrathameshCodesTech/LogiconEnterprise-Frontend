@@ -18,6 +18,7 @@ import {
   loadBillableBudgetOptionsForSite,
   loadNonBillableBudgetOptionsForDepartments,
 } from '@/features/budgets/budgetLookup'
+import { useAuthStore } from '@/features/auth/authStore'
 
 export type { DepartmentOption } from '@/api/departments'
 
@@ -60,6 +61,8 @@ const REQUESTER_TYPES: { value: RequestedByType; label: string }[] = [
   { value: 'client', label: 'Client' },
 ]
 
+const CLIENT_FACING_ROLE_CODES = new Set(['client_admin', 'client_site_user', 'site_supervisor', 'client_user'])
+
 // Do not offer terminal statuses (backend blocks direct set).
 const STATUS_OPTIONS: { value: MRFStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -82,6 +85,12 @@ function isPastDate(yyyyMmDd: string): boolean {
 
 function optionLabel(o: DepartmentOption) {
   return o.scopeLabel ? `${o.label} — ${o.scopeLabel}` : o.label
+}
+
+function isClientFacingMe(me: ReturnType<typeof useAuthStore.getState>['me']): boolean {
+  if (!me || me.is_superuser) return false
+  const roleCodes = (me.role_assignments ?? []).map((r) => r.role_code).filter(Boolean)
+  return roleCodes.length > 0 && roleCodes.every((code) => CLIENT_FACING_ROLE_CODES.has(code))
 }
 
 export function MRFForm({
@@ -111,9 +120,11 @@ export function MRFForm({
   errorMessage?: string | null
   onSubmit: (values: MRFFormValues) => void | Promise<void>
 }) {
+  const me = useAuthStore((s) => s.me)
+  const clientFacingRequester = isClientFacingMe(me)
   const [values, setValues] = useState<MRFFormValues>(() => ({
     site: initialMRF?.site != null ? String(initialMRF.site) : '',
-    requested_by_type: (initialMRF?.requested_by_type ?? 'internal') as RequestedByType,
+    requested_by_type: clientFacingRequester ? 'client' : ((initialMRF?.requested_by_type ?? 'internal') as RequestedByType),
     mrf_type: (initialMRF?.mrf_type ?? 'new_hiring') as MRFType,
     billing_type: (initialMRF?.billing_type ?? 'billable') as BillingType,
     requesting_department:
@@ -132,6 +143,11 @@ export function MRFForm({
     budget_plan: initialMRF?.budget_plan != null ? String(initialMRF.budget_plan) : '',
     ...clientFieldsFromRow(initialMRF),
   }))
+
+  useEffect(() => {
+    if (!clientFacingRequester) return
+    setValues((v) => (v.requested_by_type === 'client' ? v : { ...v, requested_by_type: 'client' }))
+  }, [clientFacingRequester])
 
   const siteError = useMemo(() => (values.site ? null : 'Site is required.'), [values.site])
   const requiredByError = useMemo(() => {
@@ -366,19 +382,29 @@ export function MRFForm({
         </p>
       </div>
 
-      <Select
-        id="mrf_requested_by_type"
-        label="Requested by type"
-        value={values.requested_by_type}
-        onChange={(e) => setValues((v) => ({ ...v, requested_by_type: e.target.value as RequestedByType }))}
-        disabled={submitting}
-      >
-        {REQUESTER_TYPES.map((t) => (
-          <option key={t.value} value={t.value}>
-            {t.label}
-          </option>
-        ))}
-      </Select>
+      {clientFacingRequester ? (
+        <div className="rounded-panel border border-app-border bg-app-muted/40 px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Requested by</p>
+          <p className="mt-1 text-sm font-medium text-app-text">Client</p>
+          <p className="mt-1 text-xs text-app-secondary">
+            Client users raise manpower requests as client requests. Internal request types are available only to internal teams.
+          </p>
+        </div>
+      ) : (
+        <Select
+          id="mrf_requested_by_type"
+          label="Requested by type"
+          value={values.requested_by_type}
+          onChange={(e) => setValues((v) => ({ ...v, requested_by_type: e.target.value as RequestedByType }))}
+          disabled={submitting}
+        >
+          {REQUESTER_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </Select>
+      )}
 
       {!canReadBudget && initialMRF?.budget_plan != null && (initialMRF.budget_plan_name || initialMRF.budget_plan_code) ? (
         <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm text-app-secondary">

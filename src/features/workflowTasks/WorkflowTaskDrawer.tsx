@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { actOnWorkflowStep, getMyWorkflowTaskDetail } from '@/api/workflow'
-import { parseApiError } from '@/lib/apiError'
+import { parseApiError, parseWorkflowStepActionError } from '@/lib/apiError'
+import { WorkflowActionErrorBanner } from '@/features/workflowTasks/WorkflowActionErrorBanner'
 import { formatLineItemBillableImpact, formatMoney } from '@/features/mrf/mrfBudgetContext'
+import {
+  countCommercialOverrides,
+  formatCommercialMoney,
+  formatMasterCommercialSummary,
+  formatRequestedCommercialSummary,
+  formatWageRange,
+  isCommercialOverrideEnabled,
+  resolveMasterCommercials,
+} from '@/features/mrf/mrfCommercialOverride'
 import type {
   WorkflowAction,
   WorkflowMyTask,
@@ -140,26 +150,40 @@ function LineItemPreviewRow({
       ? `Headcount ${li.headcount} of ${approved}`
       : `Headcount ${li.headcount}`
 
-  const rateParts: string[] = []
-  if (li.wage_min_requested || li.wage_max_requested) {
-    rateParts.push(
-      `${formatMoney(li.wage_min_requested)}–${formatMoney(li.wage_max_requested)}`,
-    )
-  }
-  if (isBillable) {
-    const rate = li.billing_rate_snapshot ?? li.srr_billing_rate
-    if (rate) rateParts.push(`Billing ${formatMoney(rate)}`)
-  }
+  const overridden = isCommercialOverrideEnabled(li)
+  const master = resolveMasterCommercials(li, null)
 
   return (
     <div className="flex items-start gap-3 rounded-panel bg-app-muted/50 px-3 py-2">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-app-text">
-          {li.job_role_name ?? (li.job_role != null ? `Role #${li.job_role}` : '—')}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-medium text-app-text">
+            {li.job_role_name ?? (li.job_role != null ? `Role #${li.job_role}` : '—')}
+          </p>
+          {overridden ? <Badge variant="warning">Commercial override</Badge> : null}
+        </div>
         <p className="mt-0.5 text-xs text-app-secondary">{headStr}</p>
-        {rateParts.length > 0 && (
-          <p className="mt-0.5 text-[10px] text-app-subtle">{rateParts.join(' · ')}</p>
+        {isBillable && overridden ? (
+          <>
+            <p className="mt-0.5 text-[10px] text-app-subtle">
+              Master: {formatMasterCommercialSummary(master)}
+            </p>
+            <p className="mt-0.5 text-[10px] text-app-secondary">
+              Requested: {formatRequestedCommercialSummary(li)}
+            </p>
+            {li.commercial_override_reason ? (
+              <p className="mt-0.5 line-clamp-2 text-[10px] text-app-subtle">
+                {li.commercial_override_reason}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-0.5 text-[10px] text-app-subtle">
+            {formatWageRange(li.wage_min_requested, li.wage_max_requested) ?? '—'}
+            {isBillable && (li.billing_rate_snapshot ?? li.srr_billing_rate)
+              ? ` · Billing ${formatCommercialMoney(li.billing_rate_snapshot ?? li.srr_billing_rate)}`
+              : ''}
+          </p>
         )}
       </div>
     </div>
@@ -196,6 +220,7 @@ function MrfOverviewTab({
   const subtitle = [mrf.client_name?.trim(), mrf.site_name?.trim()]
     .filter(Boolean)
     .join(' · ')
+  const overrideCount = countCommercialOverrides(lineItems)
 
   return (
     <div className="space-y-3">
@@ -245,6 +270,16 @@ function MrfOverviewTab({
       </div>
 
       <TaskBudgetImpactCard source={mrf} />
+
+      {overrideCount > 0 ? (
+        <div className="rounded-panel border border-status-warning/40 bg-status-warning/5 px-4 py-3 text-sm text-app-secondary">
+          <p className="font-medium text-app-text">Commercial override review</p>
+          <p className="mt-1 text-xs">
+            {overrideCount} line item{overrideCount !== 1 ? 's' : ''} override configured commercial
+            wage/billing values. Review master vs requested amounts in the Line items tab.
+          </p>
+        </div>
+      ) : null}
 
       <TaskApprovalCard
         stepName={task.step_name}
@@ -400,6 +435,7 @@ function LineItemsTab({
             {isBillable ? (
               <>
                 <TH className="py-2">Headcount impact</TH>
+                <TH className="py-2">Commercials</TH>
                 <TH className="py-2">Billing / estimate</TH>
               </>
             ) : (
@@ -415,6 +451,8 @@ function LineItemsTab({
         <TBody>
           {items.map((li) => {
             const impact = formatLineItemBillableImpact(li, null)
+            const overridden = isCommercialOverrideEnabled(li)
+            const master = resolveMasterCommercials(li, null)
             return (
               <TR key={li.id}>
                 <TD className="py-2 text-sm">
@@ -429,6 +467,34 @@ function LineItemsTab({
                           {li.site_role_requirement_label}
                         </p>
                       ) : null}
+                    </TD>
+                    <TD className="py-2 text-xs text-app-secondary">
+                      {overridden ? (
+                        <div className="space-y-1">
+                          <Badge variant="warning">Commercial override</Badge>
+                          <p className="text-[10px] text-app-subtle">
+                            Master: {formatWageRange(master.wageMin, master.wageMax) ?? '—'}
+                            {master.billingRate
+                              ? ` · Billing ${formatCommercialMoney(master.billingRate)}`
+                              : ''}
+                          </p>
+                          <p className="text-app-text">
+                            Requested: {formatRequestedCommercialSummary(li)}
+                          </p>
+                          {li.commercial_override_reason ? (
+                            <p className="line-clamp-3 text-[10px]" title={li.commercial_override_reason}>
+                              {li.commercial_override_reason}
+                            </p>
+                          ) : null}
+                          {li.commercial_overridden_at ? (
+                            <p className="text-[10px] text-app-subtle">
+                              {new Date(li.commercial_overridden_at).toLocaleString()}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <Badge variant="neutral">From SRR/master</Badge>
+                      )}
                     </TD>
                     <TD className="py-2 text-xs text-app-secondary">
                       {impact.amountLine ??
@@ -498,6 +564,8 @@ function commentHint(
   return 'Optional.'
 }
 
+// No app-wide toast helper in this repo; blocked approvals show inline alert only (see Phase Client-Onboarding-Finalization-Preflight-B).
+
 function TaskActionForm({
   detail,
   onSuccess,
@@ -507,17 +575,19 @@ function TaskActionForm({
 }) {
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [clientError, setClientError] = useState<string | null>(null)
+  const [apiActionError, setApiActionError] = useState<ReturnType<typeof parseWorkflowStepActionError> | null>(null)
 
   const { actions, task, workflow } = detail
   const instanceId = workflow.id
   const stepId = task.step_id
 
   async function submit(action: WorkflowAction) {
-    setError(null)
+    setClientError(null)
+    setApiActionError(null)
     if (action !== 'approve') {
       if (!comment.trim()) {
-        setError(
+        setClientError(
           action === 'reject'
             ? 'A comment is required to reject.'
             : 'A comment is required to request changes.',
@@ -534,7 +604,7 @@ function TaskActionForm({
       setComment('')
       onSuccess()
     } catch (e: unknown) {
-      setError(parseApiError(e, 'Action failed').message)
+      setApiActionError(parseWorkflowStepActionError(e, 'Action failed'))
     } finally {
       setSubmitting(false)
     }
@@ -580,8 +650,20 @@ function TaskActionForm({
             />
           </TaskSectionCard>
 
-          {/* Error */}
-          {error ? <ErrorState message={error} /> : null}
+          {/* Inline errors: structured API (dismissible) or client-side validation */}
+          {apiActionError ? (
+            <WorkflowActionErrorBanner
+              message={apiActionError.detail ?? apiActionError.summary}
+              bullets={[...apiActionError.errors, ...apiActionError.fieldMessages]}
+              onDismiss={() => setApiActionError(null)}
+            />
+          ) : null}
+          {clientError && !apiActionError ? (
+            <WorkflowActionErrorBanner
+              message={clientError}
+              onDismiss={() => setClientError(null)}
+            />
+          ) : null}
 
           {/* Action buttons */}
           <div className="flex flex-wrap items-center gap-2">

@@ -5,8 +5,10 @@ import {
   ClipboardList,
   Database,
   FileText,
+  FormInput,
   Handshake,
   Inbox,
+  KanbanSquare,
   UserSearch,
   LayoutDashboard,
   MapPin,
@@ -80,6 +82,12 @@ export const navGroups: NavGroup[] = [
     items: [
       { path: '/qr-campaigns', label: 'QR campaigns', icon: QrCode, requiredCapabilities: [CAP.CAMPAIGN_READ] },
       {
+        path: '/form-builder',
+        label: 'Form builder',
+        icon: FormInput,
+        requiredCapabilities: [CAP.CAMPAIGN_READ],
+      },
+      {
         path: '/intake-submissions',
         label: 'Intake submissions',
         icon: FileText,
@@ -102,6 +110,12 @@ export const navGroups: NavGroup[] = [
   {
     label: 'Hiring & deployment',
     items: [
+      {
+        path: '/hiring-pipeline',
+        label: 'Hiring pipeline',
+        icon: KanbanSquare,
+        requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
+      },
       {
         path: '/hiring-demands',
         label: 'Hiring demands',

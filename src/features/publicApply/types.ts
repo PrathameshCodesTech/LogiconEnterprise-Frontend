@@ -46,6 +46,11 @@ export interface PublicFormField {
   max_value: number | null
   role: number | null
   translations?: Partial<Record<LangCode, FormFieldTranslations>>
+  field_source?: 'campaign' | 'template'
+  section_id?: number | null
+  section_name?: string | null
+  section_code?: string | null
+  section_sort_order?: number | null
 }
 
 export interface PublicLanguageMeta {
@@ -92,6 +97,8 @@ export interface PublicSubmissionResponse {
   answers: {
     id: number
     field: number | null
+    template_field?: number | null
+    field_source?: 'campaign' | 'template'
     field_label_snapshot: string
     field_type_snapshot: string
     value: unknown

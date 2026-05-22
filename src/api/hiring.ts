@@ -63,6 +63,7 @@ export interface ListHiringApplicationsParams {
   client_decision?: string
   search?: string
   page?: number
+  page_size?: number
 }
 
 export async function listHiringApplications(

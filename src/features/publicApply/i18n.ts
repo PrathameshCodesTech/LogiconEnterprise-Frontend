@@ -31,25 +31,36 @@ export type I18nKey =
   | 'maxFiles'
   | 'fileTooLarge'
   | 'fileTypeNotAllowed'
+  | 'contactDetails'
+  | 'applyingFor'
+  | 'generalInfo'
+  | 'documents'
+  | 'tapToUpload'
+  | 'uploadHint'
+  | 'idProof'
+  | 'certificate'
+  | 'otherDocs'
+  | 'selectOption'
+  | 'roleSpecificInfo'
 
 const dict: Record<LangCode, Record<I18nKey, string>> = {
   en: {
-    appTitle: 'Logicon ATS',
+    appTitle: 'Logicon Facility Management',
     loading: 'Loading...',
     invalidLink: 'This link is invalid or expired.',
     loadError: 'Could not load this campaign. Please try again later.',
     submitError: 'Could not submit. Please check your inputs and try again.',
-    firstName: 'First name',
-    middleName: 'Middle name',
-    lastName: 'Last name',
-    mobile: 'Mobile number',
+    firstName: 'First Name',
+    middleName: 'Middle Name',
+    lastName: 'Last Name',
+    mobile: 'Mobile Number',
     role: 'Role',
     otherRole: 'Other role title',
     otherRolePlaceholder: 'Enter role title',
     language: 'Language',
-    resume: 'Resume',
+    resume: 'Resume / CV',
     resumeRequired: 'Resume is required.',
-    submit: 'Submit',
+    submit: 'Submit Application',
     submitting: 'Submitting...',
     successTitle: 'Application submitted',
     successDesc: 'Thank you. Your submission has been received.',
@@ -64,9 +75,20 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     maxFiles: 'A maximum of 5 files can be uploaded.',
     fileTooLarge: 'File exceeds the 10 MB limit.',
     fileTypeNotAllowed: 'Unsupported file type.',
+    contactDetails: 'Contact Details',
+    applyingFor: 'Applying For',
+    generalInfo: 'General Information',
+    documents: 'Documents',
+    tapToUpload: 'Tap to upload file',
+    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — max 10 MB each, 5 files total',
+    idProof: 'ID Proof',
+    certificate: 'Certificate',
+    otherDocs: 'Other Documents',
+    selectOption: 'Select',
+    roleSpecificInfo: 'Role specific information',
   },
   hi: {
-    appTitle: 'लॉजिकॉन एटीएस',
+    appTitle: 'लॉजिकॉन फैसिलिटी मैनेजमेंट',
     loading: 'लोड हो रहा है...',
     invalidLink: 'यह लिंक अमान्य या समाप्त हो चुका है।',
     loadError: 'कैंपेन लोड नहीं हो सका। कृपया बाद में फिर प्रयास करें।',
@@ -79,9 +101,9 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     otherRole: 'अन्य भूमिका',
     otherRolePlaceholder: 'भूमिका लिखें',
     language: 'भाषा',
-    resume: 'रेज्यूमे',
+    resume: 'रेज्यूमे / सीवी',
     resumeRequired: 'रेज्यूमे आवश्यक है।',
-    submit: 'सबमिट',
+    submit: 'आवेदन जमा करें',
     submitting: 'सबमिट हो रहा है...',
     successTitle: 'आवेदन सबमिट हो गया',
     successDesc: 'धन्यवाद। आपका आवेदन प्राप्त हो गया है।',
@@ -96,9 +118,20 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     maxFiles: 'अधिकतम 5 फाइलें अपलोड की जा सकती हैं।',
     fileTooLarge: 'फाइल 10 MB सीमा से बड़ी है।',
     fileTypeNotAllowed: 'यह फाइल प्रकार समर्थित नहीं है।',
+    contactDetails: 'संपर्क विवरण',
+    applyingFor: 'किस पद के लिए आवेदन',
+    generalInfo: 'सामान्य जानकारी',
+    documents: 'दस्तावेज़',
+    tapToUpload: 'फाइल अपलोड करने के लिए टैप करें',
+    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — अधिकतम 10 MB प्रति फाइल, 5 फाइलें कुल',
+    idProof: 'पहचान प्रमाण',
+    certificate: 'प्रमाणपत्र',
+    otherDocs: 'अन्य दस्तावेज़',
+    selectOption: 'चुनें',
+    roleSpecificInfo: 'भूमिका संबंधित जानकारी',
   },
   mr: {
-    appTitle: 'लॉजिकॉन एटीएस',
+    appTitle: 'लॉजिकॉन फॅसिलिटी मॅनेजमेंट',
     loading: 'लोड होत आहे...',
     invalidLink: 'ही लिंक अवैध आहे किंवा कालबाह्य झाली आहे.',
     loadError: 'कॅम्पेन लोड झाले नाही. कृपया नंतर पुन्हा प्रयत्न करा.',
@@ -111,9 +144,9 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     otherRole: 'इतर भूमिका',
     otherRolePlaceholder: 'भूमिका लिहा',
     language: 'भाषा',
-    resume: 'रेझ्युमे',
+    resume: 'रेझ्युमे / सीव्ही',
     resumeRequired: 'रेझ्युमे आवश्यक आहे.',
-    submit: 'सबमिट',
+    submit: 'अर्ज सबमिट करा',
     submitting: 'सबमिट होत आहे...',
     successTitle: 'अर्ज सबमिट झाला',
     successDesc: 'धन्यवाद. आपला अर्ज प्राप्त झाला आहे.',
@@ -128,6 +161,17 @@ const dict: Record<LangCode, Record<I18nKey, string>> = {
     maxFiles: 'जास्तीत जास्त 5 फाइल्स अपलोड करता येतील.',
     fileTooLarge: 'फाइल 10 MB मर्यादेपेक्षा मोठी आहे.',
     fileTypeNotAllowed: 'हा फाइल प्रकार समर्थित नाही.',
+    contactDetails: 'संपर्क तपशील',
+    applyingFor: 'कोणत्या पदासाठी अर्ज',
+    generalInfo: 'सामान्य माहिती',
+    documents: 'कागदपत्रे',
+    tapToUpload: 'फाइल अपलोड करण्यासाठी टॅप करा',
+    uploadHint: 'PDF, DOC, DOCX, JPG, PNG — प्रत्येकी जास्तीत जास्त 10 MB, एकूण 5 फाइल्स',
+    idProof: 'ओळखपत्र',
+    certificate: 'प्रमाणपत्र',
+    otherDocs: 'इतर कागदपत्रे',
+    selectOption: 'निवडा',
+    roleSpecificInfo: 'भूमिका संबंधित माहिती',
   },
 }
 

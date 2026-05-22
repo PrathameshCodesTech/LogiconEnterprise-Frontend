@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { createMRF, deleteMRF, listMRFs, updateMRF } from '@/api/mrf'
+import { deleteMRF, listMRFs, updateMRF } from '@/api/mrf'
 import { departmentToFormOption, listDepartments, type DepartmentOption, type DepartmentRow } from '@/api/departments'
 import { listClients, type ClientRow } from '@/api/clients'
 import { listSites, type SiteProfileRow } from '@/api/sites'
@@ -17,6 +17,7 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { MRFForm, mrfFormValuesToWritePayload, type MRFFormValues, type SiteOption } from '@/features/mrf/MRFForm'
+import { MRFCreateWorkspaceDrawer } from '@/features/mrf/MRFCreateWorkspaceDrawer'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
 import type { MRFRow, RequestedByType, MRFType, BillingType } from '@/features/mrf/types'
 import { budgetReservationStatusLabel, budgetReservationStatusVariant } from '@/features/budgets/budgetDisplay'
@@ -94,12 +95,13 @@ export function MRFListPage() {
   const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites])
   const clientById = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
 
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create')
   const [editing, setEditing] = useState<MRFRow | null>(null)
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const formId = useMemo(() => `mrf-form-${drawerMode}`, [drawerMode])
+  const formId = 'mrf-form-edit'
 
   function updateParam(next: Record<string, string | null>) {
     const p = new URLSearchParams(params)
@@ -201,14 +203,10 @@ export function MRFListPage() {
   }, [rows, client, siteById])
 
   function openCreate() {
-    setDrawerMode('create')
-    setEditing(null)
-    setFormError(null)
-    setDrawerOpen(true)
+    setWorkspaceOpen(true)
   }
 
   function openEdit(r: MRFRow) {
-    setDrawerMode('edit')
     setEditing(r)
     setFormError(null)
     setDrawerOpen(true)
@@ -225,15 +223,8 @@ export function MRFListPage() {
     setFormSubmitting(true)
     setFormError(null)
     try {
-      const payload = mrfFormValuesToWritePayload(values, drawerMode)
-      if (drawerMode === 'create') {
-        const created = await createMRF(payload)
-        closeDrawer()
-        navigate(`/mrf/${created.id}`)
-        return
-      }
       if (editing) {
-        await updateMRF(editing.id, payload)
+        await updateMRF(editing.id, mrfFormValuesToWritePayload(values, 'edit'))
       }
       closeDrawer()
       await refresh()
@@ -540,10 +531,26 @@ export function MRFListPage() {
         </>
       )}
 
+      {workspaceOpen ? (
+        <MRFCreateWorkspaceDrawer
+          open={workspaceOpen}
+          onClose={() => setWorkspaceOpen(false)}
+          onFinished={() => {
+            void refresh()
+          }}
+          siteOptions={siteOptions}
+          departmentOptions={departmentOptions}
+          departmentsLoading={departmentsLoading}
+          departmentsError={departmentsError}
+          lookupError={lookupError}
+          canReadBudget={canReadBudget}
+        />
+      ) : null}
+
       <Drawer
         open={drawerOpen}
-        title={drawerMode === 'create' ? 'Create MRF' : 'Edit MRF'}
-        description={drawerMode === 'create' ? 'Raise a manpower request for a site.' : 'Update MRF details.'}
+        title="Edit MRF"
+        description="Update MRF details."
         onClose={closeDrawer}
         footer={
           <div className="flex items-center justify-end gap-2">
@@ -557,9 +564,9 @@ export function MRFListPage() {
         }
       >
         <MRFForm
-          key={`${drawerMode}-${editing?.id ?? 'new'}`}
+          key={`edit-${editing?.id ?? 'none'}`}
           formId={formId}
-          mode={drawerMode}
+          mode="edit"
           initialMRF={editing}
           siteOptions={siteOptions}
           departmentOptions={departmentOptions}

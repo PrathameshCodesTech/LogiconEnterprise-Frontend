@@ -4,6 +4,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { formatCount } from '@/features/dashboard/dashboardFormatters'
 import { formatMoney, MRFReadinessBudgetBlock } from '@/features/mrf/mrfBudgetContext'
+import { friendlyCommercialReadinessWarning } from '@/features/mrf/mrfCommercialOverride'
 import type { MRFReadinessResponse, MRFRow } from '@/features/mrf/types'
 
 interface MRFReadinessPanelProps {
@@ -88,6 +89,9 @@ export function MRFReadinessPanel({
   ) {
     hints.push('Adjust headcount to SRR remaining')
   }
+  if (readiness.warnings.some((w) => /commercial|override/i.test(w))) {
+    hints.push('Approver will review commercial overrides')
+  }
 
   if (readiness.ok) {
     const remainingTotal = lineItems.reduce((s, li) => s + (li.remaining_headcount ?? 0), 0)
@@ -110,6 +114,13 @@ export function MRFReadinessPanel({
                   ? ` · ${formatCount(remainingTotal)} headcount remaining across roles`
                   : null}
               </p>
+            ) : null}
+            {readiness.warnings.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs text-status-warning">
+                {readiness.warnings.map((msg) => (
+                  <li key={msg}>{friendlyCommercialReadinessWarning(msg) ?? msg}</li>
+                ))}
+              </ul>
             ) : null}
           </div>
         </div>
@@ -151,7 +162,7 @@ export function MRFReadinessPanel({
           <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle">Warnings</p>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-app-secondary">
             {readiness.warnings.map((msg) => (
-              <li key={msg}>{msg}</li>
+              <li key={msg}>{friendlyCommercialReadinessWarning(msg) ?? msg}</li>
             ))}
           </ul>
         </div>

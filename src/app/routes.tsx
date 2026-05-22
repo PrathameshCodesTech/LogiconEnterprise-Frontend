@@ -15,6 +15,8 @@ import { ClientsPage } from '@/features/clients/ClientsPage'
 import { SitesPage } from '@/features/sites/SitesPage'
 import { SiteRoleRequirementsPage } from '@/features/siteRoleRequirements/SiteRoleRequirementsPage'
 import { CampaignsPage } from '@/features/campaigns/CampaignsPage'
+import { FormBuilderListPage } from '@/features/formBuilder/FormBuilderListPage'
+import { FormTemplateEditorPage } from '@/features/formBuilder/FormTemplateEditorPage'
 import { IntakeSubmissionsPage } from '@/features/intakeSubmissions/IntakeSubmissionsPage'
 import { IntakeSubmissionDetailPage } from '@/features/intakeSubmissions/IntakeSubmissionDetailPage'
 import { ApplyPage } from '@/features/publicApply/ApplyPage'
@@ -30,6 +32,7 @@ import { CandidateDetailPage } from '@/features/talent/CandidateDetailPage'
 import { HiringDemandsPage } from '@/features/hiring/HiringDemandsPage'
 import { HiringApplicationsListPage } from '@/features/hiring/HiringApplicationsListPage'
 import { HiringApplicationDetailPage } from '@/features/hiring/HiringApplicationDetailPage'
+import { HiringPipelinePage } from '@/features/hiring/HiringPipelinePage'
 import { CAP, DEPLOYMENT_ANY, MASTERS_ANY } from '@/lib/capabilities'
 
 function LegacyWageMasterRedirect() {
@@ -129,6 +132,22 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'form-builder',
+            element: (
+              <RequireCapability anyOf={[CAP.CAMPAIGN_READ]}>
+                <FormBuilderListPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'form-builder/:templateId',
+            element: (
+              <RequireCapability anyOf={[CAP.CAMPAIGN_READ]}>
+                <FormTemplateEditorPage />
+              </RequireCapability>
+            ),
+          },
+          {
             path: 'intake-submissions',
             element: (
               <RequireCapability anyOf={[CAP.SUBMISSION_READ]}>
@@ -197,6 +216,14 @@ export const router = createBrowserRouter([
             element: (
               <RequireCapability anyOf={[CAP.CANDIDATE_READ]}>
                 <CandidateDetailPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'hiring-pipeline',
+            element: (
+              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                <HiringPipelinePage />
               </RequireCapability>
             ),
           },

@@ -11,6 +11,7 @@ export interface CampaignFormValues {
   title: string
   code: string
   site: string // '' or id string
+  form_template: string // '' or template id string
   starts_at: string // datetime-local value or ''
   ends_at: string // datetime-local value or ''
   is_active: boolean
@@ -22,6 +23,11 @@ export interface CampaignFormValues {
 }
 
 export interface SiteOption {
+  id: number
+  label: string
+}
+
+export interface FormTemplateOption {
   id: number
   label: string
 }
@@ -54,6 +60,8 @@ export function CampaignForm({
   mode,
   initialCampaign,
   siteOptions,
+  formTemplateOptions = [],
+  formTemplateLookupError = null,
   lookupError,
   submitting,
   errorMessage,
@@ -63,6 +71,8 @@ export function CampaignForm({
   mode: CampaignFormMode
   initialCampaign?: CampaignRow | null
   siteOptions: SiteOption[]
+  formTemplateOptions?: FormTemplateOption[]
+  formTemplateLookupError?: string | null
   lookupError: string | null
   submitting?: boolean
   errorMessage?: string | null
@@ -73,6 +83,7 @@ export function CampaignForm({
     title: initialCampaign?.title ?? '',
     code: initialCampaign?.code ?? '',
     site: initialCampaign?.site != null ? String(initialCampaign.site) : '',
+    form_template: initialCampaign?.form_template != null ? String(initialCampaign.form_template) : '',
     starts_at: toDatetimeLocalValue(initialCampaign?.starts_at ?? null),
     ends_at: toDatetimeLocalValue(initialCampaign?.ends_at ?? null),
     is_active: initialCampaign?.is_active ?? true,
@@ -165,6 +176,28 @@ export function CampaignForm({
         ))}
       </Select>
       {lookupError ? <p className="text-xs text-status-warning">Site lookup failed: {lookupError}</p> : null}
+
+      <Select
+        id="campaign_form_template"
+        label="Form template (optional)"
+        value={values.form_template}
+        onChange={(e) => setValues((v) => ({ ...v, form_template: e.target.value }))}
+        disabled={submitting || !!formTemplateLookupError}
+      >
+        <option value="">None (use legacy per-campaign fields)</option>
+        {formTemplateOptions.map((t) => (
+          <option key={t.id} value={String(t.id)}>
+            {t.label}
+          </option>
+        ))}
+      </Select>
+      {formTemplateLookupError ? (
+        <p className="text-xs text-status-warning">Form template lookup failed: {formTemplateLookupError}</p>
+      ) : (
+        <p className="text-xs text-app-subtle">
+          Assigning a template drives the public apply form for this campaign.
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Input

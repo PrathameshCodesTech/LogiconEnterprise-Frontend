@@ -166,7 +166,7 @@ export function FormFieldRenderer({
             errorKey && 'border-status-danger',
           )}
         >
-          <option value="">Select...</option>
+          <option value="">{t(lang, 'selectOption')} {label}...</option>
           {opts.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}

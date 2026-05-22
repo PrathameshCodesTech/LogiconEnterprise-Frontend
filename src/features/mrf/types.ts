@@ -47,6 +47,16 @@ export interface MRFLineItemRow {
   srr_wage_max?: string | null
   srr_billing_rate?: string | null
   srr_shift_hours?: string | null
+  master_wage_min_snapshot?: string | null
+  master_wage_max_snapshot?: string | null
+  master_billing_rate_snapshot?: string | null
+  master_shift_hours_snapshot?: string | null
+  commercial_override_enabled?: boolean
+  commercial_override_reason?: string | null
+  commercial_overridden_by?: number | null
+  commercial_overridden_at?: string | null
+  effective_wage_min?: string | null
+  effective_wage_max?: string | null
 }
 
 export type MRFWorkflowStatus = 'not_started' | 'active' | 'approved' | 'rejected' | 'cancelled' | string
@@ -181,6 +191,7 @@ export interface MRFLineItemWriteInput {
   budget_min?: number | null
   budget_max?: number | null
   budget_plan?: number | null
+  commercial_override_reason?: string
 }
 
 // ─── Readiness (GET /api/mrf/requests/{id}/readiness/) ─────────────────────

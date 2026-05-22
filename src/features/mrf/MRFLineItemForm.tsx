@@ -10,6 +10,14 @@ import {
   loadBillableBudgetOptionsForSite,
   loadNonBillableBudgetOptionsForDepartments,
 } from '@/features/budgets/budgetLookup'
+import { useAuthStore } from '@/features/auth/authStore'
+import { CAP, hasAnyCapability } from '@/lib/capabilities'
+import {
+  formatCommercialMoney,
+  formatMasterCommercialSummary,
+  formatWageRange,
+  resolveMasterCommercials,
+} from '@/features/mrf/mrfCommercialOverride'
 import { availableHeadcountForEdit, formatSrrOptionLabel } from '@/features/mrf/mrfSrrDisplay'
 import type { MRFLineItemRow, MRFLineItemWriteInput, MRFRow } from '@/features/mrf/types'
 import type { SiteOption } from '@/features/mrf/MRFForm'
@@ -70,6 +78,15 @@ export function MRFLineItemForm({
   lookupError: string | null
 }) {
   const isBillable = String(parentMrf.billing_type) === 'billable'
+  const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
+  const canOverrideCommercials = hasAnyCapability(meCaps, [CAP.MRF_OVERRIDE_COMMERCIALS])
+
+  const [commercialOverrideEnabled, setCommercialOverrideEnabled] = useState(
+    () => Boolean(initial?.commercial_override_enabled),
+  )
+  const [commercialOverrideReason, setCommercialOverrideReason] = useState(
+    () => initial?.commercial_override_reason?.trim() ?? '',
+  )
 
   const [values, setValues] = useState<MRFLineItemFormValues>(() => ({
     job_role: initial?.job_role != null ? String(initial.job_role) : '',
@@ -107,6 +124,37 @@ export function MRFLineItemForm({
 
   const srrLocked = isBillable && Boolean(values.site_role_requirement)
 
+  const masterCommercials = useMemo(
+    () => resolveMasterCommercials(initial, selectedSrr),
+    [initial, selectedSrr],
+  )
+
+  const showCommercialPanel = isBillable && Boolean(values.site_role_requirement)
+  const existingOverrideReadOnly =
+    Boolean(initial?.commercial_override_enabled) && !canOverrideCommercials
+  const commercialInputsLocked =
+    submitting ||
+    !!lookupError ||
+    (isBillable && srrLocked && !commercialOverrideEnabled) ||
+    existingOverrideReadOnly
+
+  function applyMasterCommercialsToValues() {
+    setValues((v) => ({
+      ...v,
+      wage_min_requested: masterCommercials.wageMin,
+      wage_max_requested: masterCommercials.wageMax,
+      billing_rate_snapshot: masterCommercials.billingRate,
+    }))
+  }
+
+  function setOverrideEnabled(next: boolean) {
+    setCommercialOverrideEnabled(next)
+    if (!next) {
+      setCommercialOverrideReason('')
+      applyMasterCommercialsToValues()
+    }
+  }
+
   function applySrrSelection(srrId: string) {
     if (!srrId) {
       setValues((v) => ({ ...v, site_role_requirement: '' }))
@@ -117,14 +165,15 @@ export function MRFLineItemForm({
       setValues((v) => ({ ...v, site_role_requirement: srrId }))
       return
     }
+    const master = resolveMasterCommercials(null, srr)
     setValues((v) => ({
       ...v,
       site_role_requirement: srrId,
       job_role: String(srr.job_role),
       wage_category: srr.wage_category != null ? String(srr.wage_category) : '',
-      wage_min_requested: srr.wage_min ?? '',
-      wage_max_requested: srr.wage_max ?? '',
-      billing_rate_snapshot: srr.billing_rate ?? '',
+      wage_min_requested: commercialOverrideEnabled ? v.wage_min_requested : master.wageMin,
+      wage_max_requested: commercialOverrideEnabled ? v.wage_max_requested : master.wageMax,
+      billing_rate_snapshot: commercialOverrideEnabled ? v.billing_rate_snapshot : master.billingRate,
     }))
   }
 
@@ -250,6 +299,11 @@ export function MRFLineItemForm({
 
   const jobRoleError = useMemo(() => (values.job_role ? null : 'Job role is required.'), [values.job_role])
 
+  const overrideReasonError = useMemo(() => {
+    if (!isBillable || !commercialOverrideEnabled) return null
+    return commercialOverrideReason.trim() ? null : 'Override reason is required.'
+  }, [isBillable, commercialOverrideEnabled, commercialOverrideReason])
+
   const canSubmit =
     !submitting &&
     !lookupError &&
@@ -257,7 +311,8 @@ export function MRFLineItemForm({
     !srrRequiredError &&
     !wageRangeError &&
     !budgetRangeError &&
-    !jobRoleError
+    !jobRoleError &&
+    !overrideReasonError
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -273,9 +328,21 @@ export function MRFLineItemForm({
         .map((s) => s.trim())
         .filter(Boolean),
       wage_category: values.wage_category ? Number(values.wage_category) : null,
-      wage_min_requested: toNumberOrNull(values.wage_min_requested),
-      wage_max_requested: toNumberOrNull(values.wage_max_requested),
-      billing_rate_snapshot: toNumberOrNull(values.billing_rate_snapshot),
+      wage_min_requested: isBillable
+        ? commercialOverrideEnabled
+          ? toNumberOrNull(values.wage_min_requested)
+          : toNumberOrNull(masterCommercials.wageMin)
+        : toNumberOrNull(values.wage_min_requested),
+      wage_max_requested: isBillable
+        ? commercialOverrideEnabled
+          ? toNumberOrNull(values.wage_max_requested)
+          : toNumberOrNull(masterCommercials.wageMax)
+        : toNumberOrNull(values.wage_max_requested),
+      billing_rate_snapshot: isBillable
+        ? commercialOverrideEnabled
+          ? toNumberOrNull(values.billing_rate_snapshot)
+          : toNumberOrNull(masterCommercials.billingRate)
+        : toNumberOrNull(values.billing_rate_snapshot),
       budget_min: isBillable ? null : toNumberOrNull(values.budget_min),
       budget_max: isBillable ? null : toNumberOrNull(values.budget_max),
     }
@@ -285,6 +352,9 @@ export function MRFLineItemForm({
       else if (initial.budget_plan != null) payload.budget_plan = null
     } else if (bpTrim) {
       payload.budget_plan = Number(bpTrim)
+    }
+    if (isBillable && commercialOverrideEnabled) {
+      payload.commercial_override_reason = commercialOverrideReason.trim()
     }
     await onSubmit(payload)
   }
@@ -298,6 +368,9 @@ export function MRFLineItemForm({
     (billable && (!Number.isFinite(Number(parentMrf.site)) || selectedSite?.client == null))
 
   const roleFieldsDisabled = submitting || !!lookupError || (isBillable && srrLocked)
+  const wageFieldLabels = isBillable && commercialOverrideEnabled
+    ? { min: 'Requested wage min', max: 'Requested wage max', billing: 'Requested billing rate' }
+    : { min: 'Wage min requested', max: 'Wage max requested', billing: 'Billing rate snapshot' }
 
   return (
     <form id={formId} onSubmit={handleSubmit} className="space-y-4">
@@ -467,22 +540,105 @@ export function MRFLineItemForm({
         ))}
       </Select>
 
+      {showCommercialPanel ? (
+        <div className="space-y-3 rounded-panel border border-app-border bg-app-muted/40 p-3">
+          <div>
+            <p className="text-sm font-semibold text-app-text">Configured commercial values</p>
+            <p className="mt-0.5 text-xs text-app-secondary">
+              These values come from the approved site role requirement and wage master.
+            </p>
+          </div>
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-app-subtle">Wage range</dt>
+              <dd className="font-medium tabular-nums text-app-text">
+                {formatWageRange(masterCommercials.wageMin, masterCommercials.wageMax) ?? '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-app-subtle">Billing rate</dt>
+              <dd className="font-medium tabular-nums text-app-text">
+                {formatCommercialMoney(masterCommercials.billingRate) ?? '—'}
+              </dd>
+            </div>
+            {masterCommercials.shiftHours ? (
+              <div>
+                <dt className="text-xs text-app-subtle">Shift hours</dt>
+                <dd className="font-medium text-app-text">{masterCommercials.shiftHours}h</dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="text-xs text-app-subtle">{formatMasterCommercialSummary(masterCommercials)}</p>
+
+          {initial?.commercial_override_enabled && initial.commercial_overridden_at ? (
+            <p className="text-xs text-app-secondary">
+              Override recorded at {new Date(initial.commercial_overridden_at).toLocaleString()}
+            </p>
+          ) : null}
+
+          {canOverrideCommercials ? (
+            <label className="flex items-center gap-2 text-sm text-app-secondary">
+              <input
+                type="checkbox"
+                checked={commercialOverrideEnabled}
+                onChange={(e) => setOverrideEnabled(e.target.checked)}
+                disabled={submitting}
+              />
+              Override commercial values
+            </label>
+          ) : (
+            <p className="text-xs text-app-secondary">
+              {existingOverrideReadOnly
+                ? 'Commercial values were overridden on this line. You do not have permission to change them.'
+                : 'Commercial values come from approved SRR/wage master. You do not have permission to override commercial values.'}
+            </p>
+          )}
+
+          {commercialOverrideEnabled && canOverrideCommercials ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="mrf_li_override_reason" className="text-sm font-medium text-app-secondary">
+                Override reason
+              </label>
+              <textarea
+                id="mrf_li_override_reason"
+                value={commercialOverrideReason}
+                onChange={(e) => setCommercialOverrideReason(e.target.value)}
+                disabled={submitting}
+                rows={3}
+                className="w-full rounded-panel border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                placeholder="Explain why wage or billing differs from the configured master values."
+              />
+              {overrideReasonError ? (
+                <p className="text-sm text-status-danger">{overrideReasonError}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {existingOverrideReadOnly && initial?.commercial_override_reason ? (
+            <div className="rounded border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs text-app-secondary">
+              <p className="font-medium text-app-text">Override reason</p>
+              <p className="mt-1 whitespace-pre-wrap">{initial.commercial_override_reason}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Input
           id="mrf_li_wage_min"
-          label="Wage min requested"
+          label={wageFieldLabels.min}
           value={values.wage_min_requested}
           onChange={(e) => setValues((v) => ({ ...v, wage_min_requested: e.target.value }))}
-          disabled={submitting || (isBillable && srrLocked)}
+          disabled={commercialInputsLocked}
           inputMode="decimal"
           error={wageRangeError ?? undefined}
         />
         <Input
           id="mrf_li_wage_max"
-          label="Wage max requested"
+          label={wageFieldLabels.max}
           value={values.wage_max_requested}
           onChange={(e) => setValues((v) => ({ ...v, wage_max_requested: e.target.value }))}
-          disabled={submitting || (isBillable && srrLocked)}
+          disabled={commercialInputsLocked}
           inputMode="decimal"
         />
       </div>
@@ -490,10 +646,10 @@ export function MRFLineItemForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <Input
           id="mrf_li_billing_rate_snapshot"
-          label="Billing rate snapshot"
+          label={wageFieldLabels.billing}
           value={values.billing_rate_snapshot}
           onChange={(e) => setValues((v) => ({ ...v, billing_rate_snapshot: e.target.value }))}
-          disabled={submitting || (isBillable && srrLocked)}
+          disabled={commercialInputsLocked}
           inputMode="decimal"
         />
         <div />

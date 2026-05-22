@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { createCampaignJobRole, deleteCampaignJobRole, listCampaignJobRoles, updateCampaignJobRole } from '@/api/campaignJobRoles'
+import { listTemplateFields } from '@/api/formBuilder'
 import { listJobRoles } from '@/api/jobs'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -9,10 +10,17 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { parseApiError } from '@/lib/apiError'
 import type { CampaignJobRoleRow } from '@/features/campaigns/types'
+import type { FormTemplateFieldRow } from '@/features/formBuilder/types'
 
 type JobRoleLookup = { id: number; name: string; code: string }
 
-export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
+export function CampaignRoleManager({
+  campaignId,
+  formTemplateId,
+}: {
+  campaignId: number
+  formTemplateId?: number | null
+}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<CampaignJobRoleRow[]>([])
@@ -20,6 +28,9 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
   const [jobRolesLoading, setJobRolesLoading] = useState(true)
   const [jobRolesError, setJobRolesError] = useState<string | null>(null)
   const [jobRoles, setJobRoles] = useState<JobRoleLookup[]>([])
+
+  const [templateFieldsError, setTemplateFieldsError] = useState<string | null>(null)
+  const [templateFields, setTemplateFields] = useState<FormTemplateFieldRow[]>([])
 
   const [selectedJobRole, setSelectedJobRole] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -29,6 +40,24 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
   const inactiveRoles = useMemo(() => rows.filter((r) => !r.is_active), [rows])
   const activeJobRoleIds = useMemo(() => new Set(activeRoles.map((r) => r.job_role)), [activeRoles])
   const inactiveByJobRoleId = useMemo(() => new Map(inactiveRoles.map((r) => [r.job_role, r])), [inactiveRoles])
+  const templateRoleIds = useMemo(
+    () => new Set(templateFields.filter((f) => f.is_active && f.role != null).map((f) => f.role as number)),
+    [templateFields],
+  )
+  const shouldRestrictToTemplateRoles = Boolean(formTemplateId && templateRoleIds.size > 0)
+  const roleOptions = useMemo(
+    () =>
+      jobRoles.filter((r) => {
+        if (activeJobRoleIds.has(r.id)) return false
+        if (!shouldRestrictToTemplateRoles) return true
+        return templateRoleIds.has(r.id)
+      }),
+    [activeJobRoleIds, jobRoles, shouldRestrictToTemplateRoles, templateRoleIds],
+  )
+  const activeRolesOutsideTemplate = useMemo(() => {
+    if (!shouldRestrictToTemplateRoles) return []
+    return activeRoles.filter((r) => !templateRoleIds.has(r.job_role))
+  }, [activeRoles, shouldRestrictToTemplateRoles, templateRoleIds])
 
   async function refresh() {
     setLoading(true)
@@ -58,11 +87,27 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
     }
   }
 
+  async function loadTemplateFields() {
+    setTemplateFieldsError(null)
+    if (!formTemplateId) {
+      setTemplateFields([])
+      return
+    }
+    try {
+      const res = await listTemplateFields({ template: formTemplateId, is_active: true })
+      setTemplateFields(res.items)
+    } catch (e: unknown) {
+      setTemplateFields([])
+      setTemplateFieldsError(parseApiError(e, 'Template field lookup failed').message)
+    }
+  }
+
   useEffect(() => {
     void refresh()
     void loadJobRoles()
+    void loadTemplateFields()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId])
+  }, [campaignId, formTemplateId])
 
   async function handleAdd() {
     if (!selectedJobRole || submitting) return
@@ -159,6 +204,17 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
         </div>
       ) : null}
 
+      {activeRolesOutsideTemplate.length ? (
+        <div className="mt-3 rounded-panel border border-status-warning/30 bg-status-warning/10 px-3 py-2">
+          <p className="text-xs font-semibold text-status-warning">Role/template mismatch</p>
+          <p className="mt-1 text-xs text-app-secondary">
+            These campaign roles are not used by the assigned form template:{' '}
+            {activeRolesOutsideTemplate.map((r) => r.job_role_name).join(', ')}. Candidates can still select them, but no role-specific
+            template fields will appear.
+          </p>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <Select
           id={`add_job_role_${campaignId}`}
@@ -168,13 +224,11 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
           disabled={jobRolesLoading || !!jobRolesError || submitting}
         >
           <option value="">Select a job role...</option>
-          {jobRoles
-            .filter((r) => !activeJobRoleIds.has(r.id))
-            .map((r) => (
-              <option key={r.id} value={String(r.id)}>
-                {r.name} ({r.code})
-              </option>
-            ))}
+          {roleOptions.map((r) => (
+            <option key={r.id} value={String(r.id)}>
+              {r.name} ({r.code})
+            </option>
+          ))}
         </Select>
         <Button
           type="button"
@@ -188,6 +242,12 @@ export function CampaignRoleManager({ campaignId }: { campaignId: number }) {
       </div>
 
       {jobRolesError ? <p className="mt-2 text-xs text-status-warning">Job role lookup failed: {jobRolesError}</p> : null}
+      {templateFieldsError ? <p className="mt-2 text-xs text-status-warning">Template field lookup failed: {templateFieldsError}</p> : null}
+      {shouldRestrictToTemplateRoles ? (
+        <p className="mt-2 text-xs text-app-subtle">
+          This campaign uses a form template, so Add role only lists roles with role-specific fields in that template.
+        </p>
+      ) : null}
       {submitError ? <p className="mt-2 text-xs text-status-danger">{submitError}</p> : null}
     </div>
   )

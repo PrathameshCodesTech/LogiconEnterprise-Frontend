@@ -18,6 +18,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { MRFLineItemForm, type Option } from '@/features/mrf/MRFLineItemForm'
+import { LineItemCommercialDisplay } from '@/features/mrf/LineItemCommercialDisplay'
 import { formatLineItemBillableImpact } from '@/features/mrf/mrfBudgetContext'
 import { formatLineItemSrrSummary } from '@/features/mrf/mrfSrrDisplay'
 import type { SiteOption } from '@/features/mrf/MRFForm'
@@ -304,22 +305,13 @@ export function MRFLineItemsTable({
                     ) : null}
                   </TD>
                   <TD className="text-xs text-app-secondary">
-                    {r.wage_category ? (
-                      <span>
-                        {wageNameById.get(r.wage_category) ?? `#${r.wage_category}`}
-                        {r.wage_min_requested || r.wage_max_requested ? (
-                          <span className="text-app-subtle"> - {r.wage_min_requested ?? '-'}-{r.wage_max_requested ?? '-'}</span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span>
-                        {r.wage_min_requested || r.wage_max_requested ? (
-                          <span>{r.wage_min_requested ?? '-'}-{r.wage_max_requested ?? '-'}</span>
-                        ) : (
-                          '-'
-                        )}
-                      </span>
-                    )}
+                    <LineItemCommercialDisplay
+                      row={r}
+                      isBillable={isBillable}
+                      wageCategoryLabel={
+                        r.wage_category ? wageNameById.get(r.wage_category) ?? `#${r.wage_category}` : null
+                      }
+                    />
                   </TD>
                   <TD className="text-xs text-app-secondary">
                     <div className="font-medium text-app-text">{lineItemBudgetPlanSummary(r, parentMrf)}</div>

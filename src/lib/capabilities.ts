@@ -45,6 +45,7 @@ export const CAP = {
   MRF_CREATE: 'mrf.create',
   MRF_UPDATE: 'mrf.update',
   MRF_DELETE: 'mrf.delete',
+  MRF_OVERRIDE_COMMERCIALS: 'mrf.override_commercials',
 
   CLIENT_ONBOARDING_READ: 'client_onboarding.read',
   CLIENT_ONBOARDING_CREATE: 'client_onboarding.create',

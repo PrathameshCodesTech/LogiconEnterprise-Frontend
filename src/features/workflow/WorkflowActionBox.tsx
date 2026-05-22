@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { actOnWorkflowStep } from '@/api/workflow'
-import { parseApiError } from '@/lib/apiError'
+import { parseWorkflowStepActionError } from '@/lib/apiError'
+import { WorkflowActionErrorBanner } from '@/features/workflowTasks/WorkflowActionErrorBanner'
 import { Button } from '@/components/ui/Button'
-import { ErrorState } from '@/components/ui/ErrorState'
 import { Input } from '@/components/ui/Input'
 import type { WorkflowAction } from '@/features/workflow/types'
 
@@ -29,7 +29,8 @@ export function WorkflowActionBox({
 }) {
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [clientError, setClientError] = useState<string | null>(null)
+  const [apiActionError, setApiActionError] = useState<ReturnType<typeof parseWorkflowStepActionError> | null>(null)
 
   const isActive = workflowStatus === 'active'
   const isAssignee = meId != null && assignedUserId != null && meId === assignedUserId
@@ -40,11 +41,14 @@ export function WorkflowActionBox({
   }
 
   async function submit(action: WorkflowAction) {
-    setError(null)
+    setClientError(null)
+    setApiActionError(null)
     if (action !== 'approve') {
       const t = comment.trim()
       if (!t) {
-        setError(action === 'reject' ? 'Comment is required to reject.' : 'Comment is required to request changes.')
+        setClientError(
+          action === 'reject' ? 'Comment is required to reject.' : 'Comment is required to request changes.',
+        )
         return
       }
     }
@@ -57,7 +61,7 @@ export function WorkflowActionBox({
       setComment('')
       await onSuccess()
     } catch (e: unknown) {
-      setError(parseApiError(e, 'Action failed').message)
+      setApiActionError(parseWorkflowStepActionError(e, 'Action failed'))
     } finally {
       setSubmitting(false)
     }
@@ -77,7 +81,20 @@ export function WorkflowActionBox({
         enforces access). Reject and request changes require a comment.
       </p>
 
-      {error ? <div className="mt-3"><ErrorState message={error} /></div> : null}
+      {apiActionError ? (
+        <div className="mt-3">
+          <WorkflowActionErrorBanner
+            message={apiActionError.detail ?? apiActionError.summary}
+            bullets={[...apiActionError.errors, ...apiActionError.fieldMessages]}
+            onDismiss={() => setApiActionError(null)}
+          />
+        </div>
+      ) : null}
+      {clientError && !apiActionError ? (
+        <div className="mt-3">
+          <WorkflowActionErrorBanner message={clientError} onDismiss={() => setClientError(null)} />
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-3">
         <Input

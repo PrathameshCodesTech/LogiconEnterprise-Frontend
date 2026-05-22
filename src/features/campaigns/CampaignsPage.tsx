@@ -2,6 +2,7 @@
 import { Search } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { createCampaign, deleteCampaign, listCampaigns, updateCampaign } from '@/api/campaigns'
+import { listFormTemplates } from '@/api/formBuilder'
 import { listSites } from '@/api/sites'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
@@ -14,9 +15,15 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
-import { CampaignForm, type CampaignFormValues, type SiteOption } from '@/features/campaigns/CampaignForm'
+import {
+  CampaignForm,
+  type CampaignFormValues,
+  type FormTemplateOption,
+  type SiteOption,
+} from '@/features/campaigns/CampaignForm'
 import { CampaignQRCodeButton } from '@/features/campaigns/CampaignQRCodeButton'
 import { CampaignRoleManager } from '@/features/campaigns/CampaignRoleManager'
+import type { FormTemplateRow } from '@/features/formBuilder/types'
 import type { CampaignRow } from '@/features/campaigns/types'
 
 function parseBoolParam(v: string | null): boolean | undefined {
@@ -64,6 +71,17 @@ export function CampaignsPage() {
     [sites],
   )
   const siteNameById = useMemo(() => new Map(sites.map((s) => [s.id, s.name])), [sites])
+
+  const [formTemplates, setFormTemplates] = useState<FormTemplateRow[]>([])
+  const [formTemplatesError, setFormTemplatesError] = useState<string | null>(null)
+  const formTemplateOptions: FormTemplateOption[] = useMemo(
+    () => formTemplates.map((t) => ({ id: t.id, label: `${t.name} (${t.code})` })),
+    [formTemplates],
+  )
+  const formTemplateNameById = useMemo(
+    () => new Map(formTemplates.map((t) => [t.id, t.name] as const)),
+    [formTemplates],
+  )
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create')
@@ -119,6 +137,17 @@ export function CampaignsPage() {
     }
   }
 
+  async function loadFormTemplatesLookup() {
+    setFormTemplatesError(null)
+    try {
+      const res = await listFormTemplates({ is_active: true })
+      setFormTemplates(res.items)
+    } catch (e: unknown) {
+      setFormTemplates([])
+      setFormTemplatesError(parseApiError(e, 'Form template lookup failed').message)
+    }
+  }
+
   useEffect(() => {
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,6 +155,7 @@ export function CampaignsPage() {
 
   useEffect(() => {
     void loadSitesLookup()
+    void loadFormTemplatesLookup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -163,6 +193,7 @@ export function CampaignsPage() {
         title: values.title.trim() || undefined,
         code: values.code.trim(),
         site: values.site ? Number(values.site) : null,
+        form_template: values.form_template ? Number(values.form_template) : null,
         is_active: values.is_active,
         starts_at: values.starts_at ? new Date(values.starts_at).toISOString() : null,
         ends_at: values.ends_at ? new Date(values.ends_at).toISOString() : null,
@@ -212,6 +243,11 @@ export function CampaignsPage() {
               {r.site ? (
                 <p className="truncate text-xs text-app-subtle">
                   Site: {siteNameById.get(r.site) ?? `Site #${r.site}`}
+                </p>
+              ) : null}
+              {r.form_template != null ? (
+                <p className="truncate text-xs text-app-subtle">
+                  Template: {r.form_template_name ?? formTemplateNameById.get(r.form_template) ?? `#${r.form_template}`}
                 </p>
               ) : null}
             </div>
@@ -348,6 +384,11 @@ export function CampaignsPage() {
                           {r.starts_at ? `Starts: ${new Date(r.starts_at).toLocaleDateString()}` : 'Starts: —'}
                           {r.ends_at ? ` · Ends: ${new Date(r.ends_at).toLocaleDateString()}` : ''}
                         </p>
+                        {r.form_template != null ? (
+                          <p className="text-xs text-app-subtle">
+                            Template: {r.form_template_name ?? formTemplateNameById.get(r.form_template) ?? `#${r.form_template}`}
+                          </p>
+                        ) : null}
                       </div>
                     </TD>
                     <TD className="py-4">
@@ -444,6 +485,8 @@ export function CampaignsPage() {
           mode={drawerMode}
           initialCampaign={editing}
           siteOptions={siteOptions}
+          formTemplateOptions={formTemplateOptions}
+          formTemplateLookupError={formTemplatesError}
           lookupError={sitesError}
           submitting={formSubmitting}
           errorMessage={formError}
@@ -452,12 +495,11 @@ export function CampaignsPage() {
 
         {drawerMode === 'edit' && editing ? (
           <div className="mt-6">
-            <CampaignRoleManager campaignId={editing.id} />
+            <CampaignRoleManager campaignId={editing.id} formTemplateId={editing.form_template ?? null} />
           </div>
         ) : null}
       </Drawer>
     </div>
   )
 }
-
 

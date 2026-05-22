@@ -1,5 +1,5 @@
-﻿import { useMemo } from 'react'
-import { Paperclip } from 'lucide-react'
+import { useMemo } from 'react'
+import { Upload } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { t } from '@/features/publicApply/i18n'
 import { validateFileBasic } from '@/features/publicApply/validation'
@@ -24,24 +24,38 @@ export function FileUploadField({
   disabled?: boolean
   onChange: (file: File | null, errorKey: string | null) => void
 }) {
-  const display = useMemo(() => {
-    if (!file) return 'Choose file...'
-    const kb = Math.max(1, Math.round(file.size / 1024))
-    return `${file.name} - ${kb} KB`
+  const fileSizeKb = useMemo(() => {
+    if (!file) return null
+    return Math.max(1, Math.round(file.size / 1024))
   }, [file])
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium text-app-secondary">
+      <p className="text-sm font-medium text-app-secondary">
         {label} {required ? <span className="text-status-danger">*</span> : null}
-      </label>
-      <div className={cn('flex items-center gap-2 rounded-panel border border-app-border bg-app-surface px-3 py-2 shadow-panel', errorKey && 'border-status-danger')}>
-        <Paperclip className="h-4 w-4 text-app-subtle" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm text-app-secondary">{display}</span>
+      </p>
+      <label
+        htmlFor={id}
+        className={cn(
+          'flex cursor-pointer flex-col items-center gap-3 rounded-panel border-2 border-dashed p-6 transition hover:bg-app-muted',
+          errorKey ? 'border-status-danger' : 'border-app-border',
+          disabled && 'cursor-not-allowed opacity-60',
+        )}
+      >
+        <Upload className="h-7 w-7 text-app-subtle" aria-hidden />
+        {file ? (
+          <div className="text-center">
+            <p className="text-sm font-medium text-app-text">{file.name}</p>
+            <p className="text-xs text-app-secondary">{fileSizeKb} KB</p>
+          </div>
+        ) : (
+          <p className="text-sm text-app-secondary">{t(lang, 'tapToUpload')}</p>
+        )}
         <input
           id={id}
           type="file"
-          className="text-sm"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+          className="sr-only"
           disabled={disabled}
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null
@@ -53,7 +67,7 @@ export function FileUploadField({
             onChange(f, err)
           }}
         />
-      </div>
+      </label>
       {errorKey ? (
         <p className="text-sm text-status-danger" role="alert">
           {t(lang, errorKey as Parameters<typeof t>[1])}
@@ -62,5 +76,3 @@ export function FileUploadField({
     </div>
   )
 }
-
-
