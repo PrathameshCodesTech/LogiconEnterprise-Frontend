@@ -1,4 +1,5 @@
-﻿import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { Mail, Shield, ShieldCheck, User, Briefcase, MapPin, Building2, Users } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { displayName, userTypeLabel } from '@/features/users/types'
 import type { UserType } from '@/features/users/types'
@@ -8,70 +9,34 @@ import type { UserRoleAssignment } from '@/types/api'
 import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Drawer } from '@/components/ui/Drawer'
-import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 
 function formatUserTypeLabel(raw: string | undefined): string {
-  if (raw == null || String(raw).trim() === '') return 'Not returned'
+  if (raw == null || String(raw).trim() === '') return 'Unknown'
   const t = String(raw).trim()
   if (t === 'internal' || t === 'client' || t === 'field') return userTypeLabel(t as UserType)
   return t.replace(/_/g, ' ')
 }
 
-function roleAssignmentsTable(assignments: UserRoleAssignment[]) {
-  return (
-    <div className="hidden overflow-x-auto md:block">
-      <Table>
-        <THead>
-          <TR>
-            <TH className="py-2">Role</TH>
-            <TH className="py-2">Scope</TH>
-            <TH className="py-2">Level</TH>
-          </TR>
-        </THead>
-        <TBody>
-          {assignments.map((r) => (
-            <TR key={r.id}>
-              <TD className="py-2 align-top">
-                <span className="font-medium text-app-text">{r.role_name}</span>{' '}
-                <span className="text-xs text-app-subtle">({r.role_code})</span>
-              </TD>
-              <TD className="py-2 align-top font-mono text-xs text-app-secondary">{r.scope_node_path}</TD>
-              <TD className="py-2 align-top text-sm text-app-secondary">{formatAssignableLevel(r.role_node_type_scope)}</TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
-    </div>
-  )
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '??'
+  if (parts.length === 1) return (parts[0] ?? '').slice(0, 2).toUpperCase()
+  const first = parts[0] ?? ''
+  const last = parts[parts.length - 1] ?? ''
+  return ((first[0] ?? '') + (last[0] ?? '')).toUpperCase()
 }
 
-function roleAssignmentsCards(assignments: UserRoleAssignment[]) {
-  return (
-    <ul className="space-y-3 md:hidden">
-      {assignments.map((r) => (
-        <li key={r.id} className="rounded-panel border border-app-border bg-app-muted p-4">
-          <p className="font-medium text-app-text">
-            {r.role_name} <span className="text-xs font-normal text-app-subtle">({r.role_code})</span>
-          </p>
-          <p className="mt-2 font-mono text-xs text-app-secondary">{r.scope_node_path}</p>
-          <p className="mt-1 text-xs text-app-secondary">
-            <span className="text-app-subtle">Level:</span> {formatAssignableLevel(r.role_node_type_scope)}
-          </p>
-        </li>
-      ))}
-    </ul>
-  )
+function getScopeIcon(scope: string) {
+  if (scope.includes('site')) return <MapPin className="h-4 w-4 text-emerald-500" />
+  if (scope.includes('client')) return <Building2 className="h-4 w-4 text-amber-500" />
+  return <Users className="h-4 w-4 text-blue-500" />
 }
 
 export function MePage() {
   const me = useAuthStore((s) => s.me)
   const meLoading = useAuthStore((s) => s.meLoading)
   const meError = useAuthStore((s) => s.meError)
-
-  const [techOpen, setTechOpen] = useState(false)
 
   const caps = me?.capabilities ?? []
   const roleAssignments = me?.role_assignments ?? []
@@ -94,136 +59,147 @@ export function MePage() {
     return <ErrorState message="No profile data loaded." />
   }
 
-  const orgDisplay = me.org != null ? `Organization #${me.org}` : 'Not returned'
+  const name = displayName(me)
+  const initials = getInitials(name)
 
   return (
     <div className="w-full space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-app-text">My access</h2>
-        <p className="mt-1 text-sm text-app-secondary">
-          Review your profile, assigned roles, and where your access applies.
-        </p>
+      {/* Profile Card */}
+      <div className="rounded-2xl border border-app-border bg-app-surface p-6 shadow-sm">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+          {/* Avatar */}
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 text-2xl font-bold text-white shadow-md">
+            {initials}
+          </div>
+
+          {/* Info */}
+          <div className="flex-1 space-y-3">
+            <div>
+              <h1 className="text-xl font-bold text-app-text sm:text-2xl">{name}</h1>
+              <p className="text-sm text-app-secondary">@{me.username}</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="info">{formatUserTypeLabel(me.user_type)}</Badge>
+              {me.is_staff ? <Badge variant="neutral">Staff</Badge> : null}
+              {me.is_superuser ? <Badge variant="warning">Superuser</Badge> : null}
+            </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="flex gap-6 border-t border-app-border pt-4 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-brand-600 dark:text-brand-400">{roleAssignments.length}</p>
+              <p className="text-xs text-app-subtle">Roles</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-600 dark:text-green-400">{groupedCaps.length}</p>
+              <p className="text-xs text-app-subtle">Access Areas</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Contact Details */}
+        <div className="mt-6 grid gap-4 border-t border-app-border pt-5 sm:grid-cols-3">
+          <div className="flex items-center gap-3">
+            <Mail className="h-5 w-5 text-app-subtle" />
+            <div>
+              <p className="text-xs text-app-subtle">Email</p>
+              <p className="text-sm font-medium text-app-text">{me.email?.trim() || '—'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <User className="h-5 w-5 text-app-subtle" />
+            <div>
+              <p className="text-xs text-app-subtle">Username</p>
+              <p className="text-sm font-medium text-app-text">{me.username}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Briefcase className="h-5 w-5 text-app-subtle" />
+            <div>
+              <p className="text-xs text-app-subtle">Account Type</p>
+              <p className="text-sm font-medium text-app-text">{formatUserTypeLabel(me.user_type)}</p>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <section className="rounded-panel border border-app-border bg-app-surface p-5 shadow-panel">
-        <h3 className="text-sm font-semibold text-app-text">Profile</h3>
-        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-          <div>
-            <dt className="text-app-subtle">Name</dt>
-            <dd className="font-medium text-app-text">{displayName(me)}</dd>
-          </div>
-          <div>
-            <dt className="text-app-subtle">Username</dt>
-            <dd className="font-medium text-app-text">{me.username}</dd>
-          </div>
-          <div>
-            <dt className="text-app-subtle">Email</dt>
-            <dd className="font-medium text-app-text">{me.email?.trim() ? me.email : '—'}</dd>
-          </div>
-          <div>
-            <dt className="text-app-subtle">User type</dt>
-            <dd className="font-medium text-app-text">{formatUserTypeLabel(me.user_type)}</dd>
-          </div>
-          <div>
-            <dt className="text-app-subtle">Organization</dt>
-            <dd className="font-medium text-app-text">{orgDisplay}</dd>
-          </div>
-          <div>
-            <dt className="text-app-subtle">Staff</dt>
-            <dd className="font-medium text-app-text">{me.is_staff ? 'Yes' : 'No'}</dd>
-          </div>
-          {me.is_superuser ? (
-            <div>
-              <dt className="text-app-subtle">Superuser</dt>
-              <dd className="font-medium text-app-text">Yes</dd>
-            </div>
-          ) : null}
-        </dl>
-      </section>
-
-      <section className="rounded-panel border border-app-border bg-app-surface p-5 shadow-panel">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-app-text">Access assignments</h3>
-            <p className="mt-1 text-xs text-app-secondary">These roles define what you can do and where.</p>
-          </div>
+      {/* Role Assignments */}
+      <section className="rounded-2xl border border-app-border bg-app-surface p-6 shadow-sm">
+        <div className="mb-5 flex items-center gap-3">
+          <Shield className="h-5 w-5 text-brand-500" />
+          <h2 className="text-lg font-semibold text-app-text">My Roles</h2>
         </div>
 
         {roleAssignments.length === 0 ? (
-          <div className="mt-4">
-            <EmptyState title="No access assignments found." description="You do not have any role-based access recorded yet." />
-          </div>
+          <EmptyState
+            title="No roles assigned"
+            description="You do not have any role-based access recorded yet."
+          />
         ) : (
-          <div className="mt-4 space-y-4">
-            {roleAssignmentsTable(roleAssignments)}
-            {roleAssignmentsCards(roleAssignments)}
+          <div className="space-y-3">
+            {roleAssignments.map((r: UserRoleAssignment) => (
+              <div
+                key={r.id}
+                className="flex flex-col gap-3 rounded-xl border border-app-border bg-app-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-900/40">
+                    <Shield className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-app-text">{r.role_name}</p>
+                    <p className="text-xs text-app-subtle">{r.role_code}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 rounded-lg bg-app-surface px-3 py-1.5">
+                    {getScopeIcon(r.scope_node_path)}
+                    <span className="max-w-[200px] truncate font-mono text-xs text-app-secondary">
+                      {r.scope_node_path}
+                    </span>
+                  </div>
+                  <Badge variant="neutral">{formatAssignableLevel(r.role_node_type_scope)}</Badge>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
 
-      <section className="rounded-panel border border-app-border bg-app-surface p-5 shadow-panel">
-        <div>
-          <h3 className="text-sm font-semibold text-app-text">What I can access</h3>
-          <p className="mt-1 text-xs text-app-secondary">Summary of permissions granted by your assigned roles.</p>
+      {/* Capabilities */}
+      <section className="rounded-2xl border border-app-border bg-app-surface p-6 shadow-sm">
+        <div className="mb-5 flex items-center gap-3">
+          <ShieldCheck className="h-5 w-5 text-green-500" />
+          <h2 className="text-lg font-semibold text-app-text">What I Can Access</h2>
         </div>
 
-        {caps.length === 0 ? (
-          <p className="mt-4 text-sm text-app-secondary">No permissions returned for this account.</p>
-        ) : groupedCaps.length === 0 ? (
-          <p className="mt-4 text-sm text-app-secondary">No permissions returned for this account.</p>
+        {caps.length === 0 || groupedCaps.length === 0 ? (
+          <p className="text-sm text-app-secondary">No permissions returned for this account.</p>
         ) : (
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {groupedCaps.map((g) => (
-              <li key={`${g.sortKey}-${g.areaLabel}`} className="rounded-panel border border-app-border bg-app-muted p-4">
-                <p className="text-sm font-semibold text-app-text">{g.areaLabel}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+              <div
+                key={`${g.sortKey}-${g.areaLabel}`}
+                className="rounded-xl border border-app-border bg-app-muted/30 p-4"
+              >
+                <p className="font-semibold text-app-text">{g.areaLabel}</p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {g.actions.map((a) => (
-                    <span key={a.raw} title={a.raw}>
-                      <Badge variant="neutral" className="font-normal">
-                        {a.friendly}
-                      </Badge>
+                    <span
+                      key={a.raw}
+                      className="inline-flex rounded-md bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                    >
+                      {a.friendly}
                     </span>
                   ))}
                 </div>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </section>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="secondary" className="min-h-9" onClick={() => setTechOpen(true)}>
-          Show technical details
-        </Button>
-      </div>
-
-      <Drawer
-        open={techOpen}
-        title="Technical details"
-        description="Raw API payload fragments for support and debugging."
-        onClose={() => setTechOpen(false)}
-      >
-        <div className="space-y-5 text-sm">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">Capabilities</p>
-            <pre className="mt-2 max-h-48 overflow-auto rounded-panel bg-app-muted p-3 text-xs text-app-text">
-              {JSON.stringify(me.capabilities ?? [], null, 2)}
-            </pre>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">Role assignments</p>
-            <pre className="mt-2 max-h-48 overflow-auto rounded-panel bg-app-muted p-3 text-xs text-app-text">
-              {JSON.stringify(me.role_assignments ?? [], null, 2)}
-            </pre>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">Scope assignments (informational)</p>
-            <pre className="mt-2 max-h-48 overflow-auto rounded-panel bg-app-muted p-3 text-xs text-app-text">
-              {JSON.stringify(me.scope_assignments ?? [], null, 2)}
-            </pre>
-          </div>
-        </div>
-      </Drawer>
     </div>
   )
 }

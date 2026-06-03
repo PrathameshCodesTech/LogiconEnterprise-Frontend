@@ -52,6 +52,25 @@ export const CAP = {
   CLIENT_ONBOARDING_UPDATE: 'client_onboarding.update',
   CLIENT_ONBOARDING_DELETE: 'client_onboarding.delete',
 
+  MOBILISATION_READ: 'mobilisation.read',
+  MOBILISATION_UPDATE: 'mobilisation.update',
+  MOBILISATION_FINALIZE: 'mobilisation.finalize',
+  MOBILISATION_MANAGE: 'mobilisation.manage',
+
+  SALES_LEAD_READ: 'sales_lead.read',
+  SALES_LEAD_UPDATE: 'sales_lead.update',
+  SALES_LEAD_MANAGE: 'sales_lead.manage',
+
+  SALES_SURVEY_READ: 'sales_survey.read',
+  SALES_SURVEY_UPDATE: 'sales_survey.update',
+  SALES_SURVEY_MANAGE: 'sales_survey.manage',
+
+  SALES_PROPOSAL_READ: 'sales_proposal.read',
+  SALES_PROPOSAL_UPDATE: 'sales_proposal.update',
+  SALES_PROPOSAL_APPROVE: 'sales_proposal.approve',
+  SALES_PROPOSAL_MANAGE: 'sales_proposal.manage',
+  SALES_PROPOSAL_SEND_TO_CLIENT: 'sales_proposal.send_to_client',
+
   WORKFLOW_READ: 'workflow.read',
   WORKFLOW_START: 'workflow.start_workflow',
   WORKFLOW_APPROVE: 'workflow.approve',
@@ -63,8 +82,12 @@ export const CAP = {
   CANDIDATE_READ: 'candidate.read',
   CANDIDATE_CREATE: 'candidate.create',
   CANDIDATE_UPDATE: 'candidate.update',
+  CANDIDATE_SHORTLIST: 'candidate.shortlist',
+
   RESUME_READ: 'resume.read',
+  RESUME_VIEW: 'resume.view_resume',
   RESUME_UPLOAD: 'resume.upload',
+
   HIRING_APPLICATION_READ: 'hiring_application.read',
   HIRING_APPLICATION_CREATE: 'hiring_application.create',
   HIRING_APPLICATION_UPDATE: 'hiring_application.update',
@@ -72,13 +95,35 @@ export const CAP = {
   PIPELINE_STAGE_READ: 'pipeline_stage.read',
   CANDIDATE_MATCH_READ: 'candidate_match.read',
 
+  OFFER_READ: 'offer.read',
+  OFFER_CREATE: 'offer.create',
+  OFFER_UPDATE: 'offer.update',
+  OFFER_APPROVE: 'offer.approve',
+  OFFER_MANAGE: 'offer.manage',
+
+  EMPLOYEE_READ: 'employee.read',
+  EMPLOYEE_CREATE: 'employee.create',
+  EMPLOYEE_UPDATE: 'employee.update',
+  EMPLOYEE_MANAGE: 'employee.manage',
+
   SITE_DEPLOYMENT_READ: 'site_deployment.read',
+  SITE_DEPLOYMENT_CREATE: 'site_deployment.create',
+  SITE_DEPLOYMENT_UPDATE: 'site_deployment.update',
+  SITE_DEPLOYMENT_MANAGE: 'site_deployment.manage',
+
   DEPLOYMENT_READ: 'deployment.read',
+  DEPLOYMENT_CREATE: 'deployment.create',
+  DEPLOYMENT_MANAGE: 'deployment.manage',
 
   BUDGET_READ: 'budget.read',
   BUDGET_CREATE: 'budget.create',
   BUDGET_UPDATE: 'budget.update',
   BUDGET_DELETE: 'budget.delete',
+
+  DEPARTMENT_READ: 'department.read',
+  DEPARTMENT_CREATE: 'department.create',
+  DEPARTMENT_UPDATE: 'department.update',
+  DEPARTMENT_DELETE: 'department.delete',
 } as const
 
 export function hasAnyCapability(userCaps: string[] | undefined, required: string[]): boolean {
@@ -102,7 +147,6 @@ export const DEPLOYMENT_ANY = [CAP.SITE_DEPLOYMENT_READ, CAP.DEPLOYMENT_READ] as
 
 /** Masters: job roles and/or wage masters */
 export const MASTERS_ANY = [CAP.JOB_ROLE_READ, CAP.WAGE_READ] as const
-
 
 
 

@@ -55,7 +55,7 @@ export const BUDGET_NATURE_OPTIONS: { value: BudgetNature; label: string }[] = [
 ]
 
 export const BUDGET_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'onboarding', label: 'Onboarding' },
+  { value: 'onboarding', label: 'Mobilisation' },
   { value: 'manpower', label: 'Manpower' },
   { value: 'hiring', label: 'Hiring' },
   { value: 'operations', label: 'Operations' },

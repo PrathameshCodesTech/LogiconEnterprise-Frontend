@@ -290,7 +290,7 @@ export function ClientOnboardingDetailPage() {
   async function handleStartWorkflow() {
     setStartInlineError(null)
     if (availableRoutes.length === 0) {
-      setStartInlineError('No approval route is configured for this onboarding request.')
+      setStartInlineError('No approval route is configured for this mobilisation setup.')
       return
     }
     if (selectedRouteId == null) {
@@ -442,7 +442,7 @@ export function ClientOnboardingDetailPage() {
           if (e.response?.status === 403) {
             setRoutesError('You do not have permission to view approval routes.')
           } else if (e.response?.status === 404) {
-            setRoutesError('This onboarding request is not accessible for route listing.')
+            setRoutesError('This mobilisation setup is not accessible for route listing.')
           } else {
             setRoutesError(parseApiError(e, 'Failed to load approval routes').message)
           }
@@ -523,20 +523,20 @@ export function ClientOnboardingDetailPage() {
 
   async function handleDelete() {
     if (!row || !canDelete) return
-    const ok = window.confirm('Delete this client onboarding request? This cannot be undone.')
+    const ok = window.confirm('Delete this mobilisation setup request? This cannot be undone.')
     if (!ok) return
     try {
       await deleteClientOnboardingRequest(row.id)
       sessionStorage.removeItem(onboardingWorkflowStorageKey(row.id))
-      navigate('/client-onboarding')
+      navigate('/mobilisation')
     } catch (e: unknown) {
       alert(parseApiError(e, 'Delete failed').message)
     }
   }
 
-  if (loading) return <Spinner label="Loading onboarding request..." />
+  if (loading) return <Spinner label="Loading mobilisation setup..." />
   if (error) return <ErrorState message={error} />
-  if (!row) return <EmptyState title="Request not found" description="This onboarding request may have been removed." />
+  if (!row) return <EmptyState title="Request not found" description="This mobilisation setup may have been removed." />
 
   const wm = workflowModel
   const fin = row.finalization_status ?? 'not_finalized'
@@ -692,7 +692,7 @@ export function ClientOnboardingDetailPage() {
       <div className="border-b border-app-border pb-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Client onboarding</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Mobilisation</p>
             <h2 className="mt-1 truncate text-xl font-semibold tracking-tight text-app-text">#{row.id}</h2>
             <p className="mt-1 text-sm text-app-secondary">
               {formatOnboardingType(String(row.onboarding_type))}
@@ -748,7 +748,7 @@ export function ClientOnboardingDetailPage() {
             <Button
               variant="secondary"
               className="min-h-9 px-2"
-              onClick={() => navigate('/client-onboarding')}
+              onClick={() => navigate('/mobilisation')}
               aria-label="Back to list"
               title="Back"
             >
@@ -898,7 +898,7 @@ export function ClientOnboardingDetailPage() {
               loading={routesLoading}
               error={routesError}
               disabled={startBusy}
-              emptyMessage="No approval route is configured for this onboarding request."
+              emptyMessage="No approval route is configured for this mobilisation setup."
             />
           </div>
         ) : null}
@@ -993,8 +993,8 @@ export function ClientOnboardingDetailPage() {
 
       <Drawer
         open={drawerOpen}
-        title="Edit onboarding request"
-        description="Update onboarding type, client or proposed client details, and notes."
+        title="Edit mobilisation setup"
+        description="Update mobilisation type, client or proposed client details, and notes."
         onClose={closeDrawer}
         footer={
           <div className="flex items-center justify-end gap-2">

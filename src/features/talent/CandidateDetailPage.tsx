@@ -251,7 +251,7 @@ export function CandidateDetailPage() {
                     <TD className="py-2 text-xs">{hiringApplicationStatusLabel(a.status)}</TD>
                     <TD className="py-2 text-right">
                       <Link
-                        to={`/hiring-applications/${a.id}`}
+                        to={`/hiring/applications/${a.id}`}
                         className="inline-flex min-h-8 items-center justify-center rounded-panel border border-app-border bg-app-surface px-2 text-sm font-medium text-app-text hover:bg-app-muted"
                       >
                         Open

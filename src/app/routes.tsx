@@ -1,4 +1,4 @@
-﻿import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom'
+﻿import { createBrowserRouter, Navigate, useLocation, useParams } from 'react-router-dom'
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { RequireCapability } from '@/features/auth/RequireCapability'
 import { LoginPage } from '@/features/auth/LoginPage'
@@ -13,6 +13,7 @@ import { UserAccessPage } from '@/features/users/UserAccessPage'
 import { RolesPage } from '@/features/roles/RolesPage'
 import { ClientsPage } from '@/features/clients/ClientsPage'
 import { SitesPage } from '@/features/sites/SitesPage'
+import { DepartmentsPage } from '@/features/departments/DepartmentsPage'
 import { SiteRoleRequirementsPage } from '@/features/siteRoleRequirements/SiteRoleRequirementsPage'
 import { CampaignsPage } from '@/features/campaigns/CampaignsPage'
 import { FormBuilderListPage } from '@/features/formBuilder/FormBuilderListPage'
@@ -22,28 +23,76 @@ import { IntakeSubmissionDetailPage } from '@/features/intakeSubmissions/IntakeS
 import { ApplyPage } from '@/features/publicApply/ApplyPage'
 import { MRFListPage } from '@/features/mrf/MRFListPage'
 import { MRFDetailPage } from '@/features/mrf/MRFDetailPage'
-import { ClientOnboardingListPage } from '@/features/clientOnboarding/ClientOnboardingListPage'
-import { ClientOnboardingDetailPage } from '@/features/clientOnboarding/ClientOnboardingDetailPage'
+import { MobilisationListPage } from '@/features/mobilisation/MobilisationListPage'
+import { MobilisationDetailPage } from '@/features/mobilisation/MobilisationDetailPage'
 import { ApprovalSetupPage } from '@/features/approvalSetup/ApprovalSetupPage'
 import { MastersPage } from '@/features/masters/MastersPage'
 import { BudgetPlansPage } from '@/features/budgets/BudgetPlansPage'
 import { CandidatesListPage } from '@/features/talent/CandidatesListPage'
 import { CandidateDetailPage } from '@/features/talent/CandidateDetailPage'
+import { ResumeReviewPage } from '@/features/talent/ResumeReviewPage'
 import { HiringDemandsPage } from '@/features/hiring/HiringDemandsPage'
+import { HiringDemandDetailPage } from '@/features/hiring/HiringDemandDetailPage'
 import { HiringApplicationsListPage } from '@/features/hiring/HiringApplicationsListPage'
 import { HiringApplicationDetailPage } from '@/features/hiring/HiringApplicationDetailPage'
 import { HiringPipelinePage } from '@/features/hiring/HiringPipelinePage'
+import { ClientReviewPage } from '@/features/hiring/ClientReviewPage'
+import { OffersPage } from '@/features/hiring/OffersPage'
+import { EmployeesPage } from '@/features/deployment/EmployeesPage'
+import { SiteDeploymentsPage } from '@/features/deployment/SiteDeploymentsPage'
+import { DeploymentHistoryPage } from '@/features/deployment/DeploymentHistoryPage'
+import { SalesDashboardPage } from '@/features/sales/SalesDashboardPage'
+import { ProposalComponentRulesPage } from '@/features/sales/ProposalComponentRulesPage'
+import { SalesLeadListPage } from '@/features/sales/SalesLeadListPage'
+import { SalesLeadDetailPage } from '@/features/sales/SalesLeadDetailPage'
+import { SiteSurveyWorkspacePage } from '@/features/sales/SiteSurveyWorkspacePage'
+import { SalesProposalWorkspacePage } from '@/features/sales/SalesProposalWorkspacePage'
+import { PublicProposalResponsePage } from '@/features/sales/PublicProposalResponsePage'
+import { OperationsSurveyQueuePage } from '@/features/sales/OperationsSurveyQueuePage'
 import { CAP, DEPLOYMENT_ANY, MASTERS_ANY } from '@/lib/capabilities'
+
+// ─── Route path constants ─────────────────────────────────────────────────────
+export const ROUTES = {
+  DASHBOARD: '/dashboard',
+  SALES: '/sales',
+  SALES_DASHBOARD: '/sales/dashboard',
+  SALES_LEADS: '/sales/leads',
+  SALES_LEAD_DETAIL: (id: number | string) => `/sales/leads/${id}`,
+  SALES_SURVEY_DETAIL: (id: number | string) => `/sales/surveys/${id}`,
+  OPERATIONS_SURVEY_DETAIL: (id: number | string) => `/sales/operations-surveys/${id}`,
+  SALES_PROPOSAL_DETAIL: (id: number | string) => `/sales/proposals/${id}`,
+  PROPOSAL_RESPONSE: '/proposal-response',
+  MOBILISATION: '/mobilisation',
+  MOBILISATION_DETAIL: (id: number | string) => `/mobilisation/${id}`,
+  CLIENT_ONBOARDING: '/client-onboarding',
+  CLIENT_ONBOARDING_DETAIL: (id: number | string) => `/client-onboarding/${id}`,
+} as const
 
 function LegacyWageMasterRedirect() {
   const { search } = useLocation()
   return <Navigate to={{ pathname: '/masters', search }} replace />
 }
 
+function ClientOnboardingDetailRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/mobilisation/${id}`} replace />
+}
+
+function HiringDemandLegacyRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/hiring/demands/${id}`} replace />
+}
+
+function HiringApplicationLegacyRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/hiring/applications/${id}`} replace />
+}
+
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/set-password', element: <SetPasswordPage /> },
   { path: '/apply/:token', element: <ApplyPage /> },
+  { path: '/proposal-response', element: <PublicProposalResponsePage /> },
   {
     path: '/',
     element: <RequireAuth />,
@@ -92,6 +141,14 @@ export const router = createBrowserRouter([
             element: (
               <RequireCapability anyOf={[CAP.SITE_READ]}>
                 <SitesPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'departments',
+            element: (
+              <RequireCapability anyOf={[CAP.DEPARTMENT_READ]}>
+                <DepartmentsPage />
               </RequireCapability>
             ),
           },
@@ -180,18 +237,98 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: 'client-onboarding',
+            path: 'mobilisation',
             element: (
-              <RequireCapability anyOf={[CAP.CLIENT_ONBOARDING_READ]}>
-                <ClientOnboardingListPage />
+              <RequireCapability anyOf={[CAP.MOBILISATION_READ]}>
+                <MobilisationListPage />
               </RequireCapability>
             ),
           },
           {
-            path: 'client-onboarding/:id',
+            path: 'mobilisation/:id',
             element: (
-              <RequireCapability anyOf={[CAP.CLIENT_ONBOARDING_READ]}>
-                <ClientOnboardingDetailPage />
+              <RequireCapability anyOf={[CAP.MOBILISATION_READ]}>
+                <MobilisationDetailPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'client-onboarding',
+            element: <Navigate to="/mobilisation" replace />,
+          },
+          {
+            path: 'client-onboarding/:id',
+            element: <ClientOnboardingDetailRedirect />,
+          },
+          {
+            path: 'sales',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_LEAD_READ]}>
+                <Navigate to="/sales/dashboard" replace />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/dashboard',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_LEAD_READ]}>
+                <SalesDashboardPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/leads',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_LEAD_READ]}>
+                <SalesLeadListPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/leads/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_LEAD_READ]}>
+                <SalesLeadDetailPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/surveys/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_SURVEY_READ]}>
+                <SiteSurveyWorkspacePage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/proposals/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_PROPOSAL_READ]}>
+                <SalesProposalWorkspacePage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/operations-surveys',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_SURVEY_READ]}>
+                <OperationsSurveyQueuePage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/operations-surveys/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_SURVEY_READ]}>
+                <SiteSurveyWorkspacePage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'sales/component-rules',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_PROPOSAL_READ]}>
+                <ProposalComponentRulesPage />
               </RequireCapability>
             ),
           },
@@ -220,7 +357,7 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: 'hiring-pipeline',
+            path: 'hiring/pipeline',
             element: (
               <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
                 <HiringPipelinePage />
@@ -228,7 +365,7 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: 'hiring-demands',
+            path: 'hiring/demands',
             element: (
               <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
                 <HiringDemandsPage />
@@ -236,7 +373,15 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: 'hiring-applications',
+            path: 'hiring/demands/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                <HiringDemandDetailPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'hiring/applications',
             element: (
               <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
                 <HiringApplicationsListPage />
@@ -244,7 +389,7 @@ export const router = createBrowserRouter([
             ),
           },
           {
-            path: 'hiring-applications/:id',
+            path: 'hiring/applications/:id',
             element: (
               <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
                 <HiringApplicationDetailPage />
@@ -255,7 +400,51 @@ export const router = createBrowserRouter([
             path: 'hiring',
             element: (
               <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <Navigate to="/hiring-applications" replace />
+                <Navigate to="/hiring/applications" replace />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'hiring-pipeline',
+            element: <Navigate to="/hiring/pipeline" replace />,
+          },
+          {
+            path: 'hiring-demands',
+            element: <Navigate to="/hiring/demands" replace />,
+          },
+          {
+            path: 'hiring-demands/:id',
+            element: <HiringDemandLegacyRedirect />,
+          },
+          {
+            path: 'hiring-applications',
+            element: <Navigate to="/hiring/applications" replace />,
+          },
+          {
+            path: 'hiring-applications/:id',
+            element: <HiringApplicationLegacyRedirect />,
+          },
+          {
+            path: 'talent/resume-review',
+            element: (
+              <RequireCapability anyOf={[CAP.RESUME_READ, CAP.RESUME_VIEW]}>
+                <ResumeReviewPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'hiring/client-review',
+            element: (
+              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                <ClientReviewPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'hiring/offers',
+            element: (
+              <RequireCapability anyOf={[CAP.OFFER_READ, CAP.OFFER_CREATE, CAP.OFFER_UPDATE, CAP.OFFER_APPROVE, CAP.OFFER_MANAGE]}>
+                <OffersPage />
               </RequireCapability>
             ),
           },
@@ -267,12 +456,33 @@ export const router = createBrowserRouter([
               </RequireCapability>
             ),
           },
+          {
+            path: 'deployment/employees',
+            element: (
+              <RequireCapability anyOf={[CAP.EMPLOYEE_READ]}>
+                <EmployeesPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'deployment/site-deployments',
+            element: (
+              <RequireCapability anyOf={[CAP.SITE_DEPLOYMENT_READ]}>
+                <SiteDeploymentsPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'deployment/history',
+            element: (
+              <RequireCapability anyOf={[CAP.DEPLOYMENT_READ]}>
+                <DeploymentHistoryPage />
+              </RequireCapability>
+            ),
+          },
         ],
       },
     ],
   },
   { path: '*', element: <Navigate to="/dashboard" replace /> },
 ])
-
-
-

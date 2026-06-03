@@ -17,7 +17,7 @@ export async function startMRFWorkflow(mrfId: number, approvalRoute?: number | n
 }
 
 export async function listAvailableApprovalRoutes(params: {
-  trigger_type: 'mrf' | 'client_onboarding'
+  trigger_type: 'mrf' | 'client_onboarding' | 'mobilisation' | 'sales_proposal'
   client?: number | null
   site?: number | null
 }) {
@@ -39,6 +39,18 @@ export async function startClientOnboardingWorkflow(onboardingId: number, approv
   const payload =
     approvalRoute != null && Number.isFinite(approvalRoute) && approvalRoute > 0 ? { approval_route: approvalRoute } : {}
   const { data } = await api.post<WorkflowInstance>(`/api/workflow/client-onboarding/${onboardingId}/start/`, payload)
+  return data
+}
+
+export async function getMobilisationConfigCheck(mobilisationId: number) {
+  const { data } = await api.get<WorkflowConfigCheck>(`/api/workflow/client-onboarding/${mobilisationId}/config-check/`)
+  return data
+}
+
+export async function startMobilisationWorkflow(mobilisationId: number, approvalRoute?: number | null) {
+  const payload =
+    approvalRoute != null && Number.isFinite(approvalRoute) && approvalRoute > 0 ? { approval_route: approvalRoute } : {}
+  const { data } = await api.post<WorkflowInstance>(`/api/workflow/client-onboarding/${mobilisationId}/start/`, payload)
   return data
 }
 

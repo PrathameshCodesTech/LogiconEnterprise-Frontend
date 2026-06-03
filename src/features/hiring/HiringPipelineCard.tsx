@@ -39,7 +39,7 @@ export function HiringPipelineCard({
     >
       <div className="flex items-start gap-2">
         <Link
-          to={`/hiring-applications/${app.id}`}
+          to={`/hiring/applications/${app.id}`}
           className="min-w-0 flex-1 text-sm font-medium leading-tight text-app-text hover:text-brand-600"
           onClick={(e) => isDragging && e.preventDefault()}
         >

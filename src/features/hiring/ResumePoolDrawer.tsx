@@ -188,7 +188,7 @@ export function ResumePoolDrawer({
           <div className="rounded-panel border border-status-success/30 bg-status-success/5 p-3 text-sm">
             <p className="font-medium text-status-success">Candidate linked to this hiring demand.</p>
             <p className="mt-2">
-              <Link className="font-medium text-brand-700 underline" to={`/hiring-applications/${linkedAppId}`}>
+              <Link className="font-medium text-brand-700 underline" to={`/hiring/applications/${linkedAppId}`}>
                 Open application
               </Link>
             </p>

@@ -10,7 +10,7 @@ import {
   validateMrfClientFields,
   type MRFClientHeaderFormValues,
 } from '@/features/mrf/mrfClientForm'
-import type { MRFRow, MRFType, BillingType, RequestedByType, MRFStatus, MRFWriteInput } from '@/features/mrf/types'
+import type { MRFRow, MRFType, BillingType, RequestedByType, MRFWriteInput } from '@/features/mrf/types'
 import type { BudgetPlanRow } from '@/features/budgets/types'
 import { budgetNatureLabel, formatBudgetAmount } from '@/features/budgets/types'
 import {
@@ -40,7 +40,6 @@ export interface MRFFormValues extends MRFClientHeaderFormValues {
   required_by_date: string // yyyy-mm-dd or ''
   reason: string
   client_visible: boolean
-  status: MRFStatus
   budget_plan: string
 }
 
@@ -50,6 +49,8 @@ const MRF_TYPES: { value: MRFType; label: string }[] = [
   { value: 'headcount_increase', label: 'Headcount increase' },
   { value: 'rate_revision', label: 'Rate revision' },
 ]
+
+const CLIENT_MRF_TYPES = MRF_TYPES.filter((t) => t.value !== 'rate_revision')
 
 const BILLING_TYPES: { value: BillingType; label: string }[] = [
   { value: 'billable', label: 'Billable' },
@@ -62,17 +63,6 @@ const REQUESTER_TYPES: { value: RequestedByType; label: string }[] = [
 ]
 
 const CLIENT_FACING_ROLE_CODES = new Set(['client_admin', 'client_site_user', 'site_supervisor', 'client_user'])
-
-// Do not offer terminal statuses (backend blocks direct set).
-const STATUS_OPTIONS: { value: MRFStatus; label: string }[] = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'hr_review', label: 'HR review' },
-  { value: 'finance_review', label: 'Finance review' },
-  { value: 'admin_review', label: 'Admin review' },
-  { value: 'client_review', label: 'Client review' },
-  { value: 'cancelled', label: 'Cancelled' },
-]
 
 function isPastDate(yyyyMmDd: string): boolean {
   if (!yyyyMmDd) return false
@@ -91,6 +81,20 @@ function isClientFacingMe(me: ReturnType<typeof useAuthStore.getState>['me']): b
   if (!me || me.is_superuser) return false
   const roleCodes = (me.role_assignments ?? []).map((r) => r.role_code).filter(Boolean)
   return roleCodes.length > 0 && roleCodes.every((code) => CLIENT_FACING_ROLE_CODES.has(code))
+}
+
+function normalizeClientRequestedValues(values: MRFFormValues): MRFFormValues {
+  if (values.requested_by_type !== 'client') return values
+  const mrfType = values.mrf_type === 'rate_revision' ? 'new_hiring' : values.mrf_type
+  if (values.billing_type === 'billable' && values.client_visible === true && values.mrf_type === mrfType) {
+    return values
+  }
+  return {
+    ...values,
+    billing_type: 'billable',
+    client_visible: true,
+    mrf_type: mrfType,
+  }
 }
 
 export function MRFForm({
@@ -122,32 +126,41 @@ export function MRFForm({
 }) {
   const me = useAuthStore((s) => s.me)
   const clientFacingRequester = isClientFacingMe(me)
-  const [values, setValues] = useState<MRFFormValues>(() => ({
-    site: initialMRF?.site != null ? String(initialMRF.site) : '',
-    requested_by_type: clientFacingRequester ? 'client' : ((initialMRF?.requested_by_type ?? 'internal') as RequestedByType),
-    mrf_type: (initialMRF?.mrf_type ?? 'new_hiring') as MRFType,
-    billing_type: (initialMRF?.billing_type ?? 'billable') as BillingType,
-    requesting_department:
-      initialMRF?.requesting_department != null && initialMRF.requesting_department !== undefined
-        ? String(initialMRF.requesting_department)
-        : '',
-    required_department:
-      initialMRF?.required_department != null && initialMRF.required_department !== undefined
-        ? String(initialMRF.required_department)
-        : '',
-    department: initialMRF?.department ?? '',
-    required_by_date: initialMRF?.required_by_date ?? '',
-    reason: initialMRF?.reason ?? '',
-    client_visible: initialMRF?.client_visible ?? false,
-    status: (initialMRF?.status ?? 'draft') as MRFStatus,
-    budget_plan: initialMRF?.budget_plan != null ? String(initialMRF.budget_plan) : '',
-    ...clientFieldsFromRow(initialMRF),
-  }))
+  const [values, setValues] = useState<MRFFormValues>(() =>
+    normalizeClientRequestedValues({
+      site: initialMRF?.site != null ? String(initialMRF.site) : '',
+      requested_by_type: clientFacingRequester ? 'client' : ((initialMRF?.requested_by_type ?? 'internal') as RequestedByType),
+      mrf_type: (initialMRF?.mrf_type ?? 'new_hiring') as MRFType,
+      billing_type: (initialMRF?.billing_type ?? 'billable') as BillingType,
+      requesting_department:
+        initialMRF?.requesting_department != null && initialMRF.requesting_department !== undefined
+          ? String(initialMRF.requesting_department)
+          : '',
+      required_department:
+        initialMRF?.required_department != null && initialMRF.required_department !== undefined
+          ? String(initialMRF.required_department)
+          : '',
+      department: initialMRF?.department ?? '',
+      required_by_date: initialMRF?.required_by_date ?? '',
+      reason: initialMRF?.reason ?? '',
+      client_visible: initialMRF?.client_visible ?? false,
+      budget_plan: initialMRF?.budget_plan != null ? String(initialMRF.budget_plan) : '',
+      ...clientFieldsFromRow(initialMRF),
+    }),
+  )
 
   useEffect(() => {
     if (!clientFacingRequester) return
-    setValues((v) => (v.requested_by_type === 'client' ? v : { ...v, requested_by_type: 'client' }))
+    setValues((v) => normalizeClientRequestedValues({ ...v, requested_by_type: 'client' }))
   }, [clientFacingRequester])
+
+  useEffect(() => {
+    if (values.requested_by_type !== 'client') return
+    setValues((v) => {
+      const normalized = normalizeClientRequestedValues(v)
+      return normalized === v ? v : normalized
+    })
+  }, [values.requested_by_type])
 
   const siteError = useMemo(() => (values.site ? null : 'Site is required.'), [values.site])
   const requiredByError = useMemo(() => {
@@ -157,6 +170,8 @@ export function MRFForm({
 
   const isBillable = values.billing_type === 'billable'
   const isNonBillable = values.billing_type === 'non_billable'
+  const isClientRequested = values.requested_by_type === 'client'
+  const mrfTypeOptions = isClientRequested ? CLIENT_MRF_TYPES : MRF_TYPES
   const clientFieldsError = useMemo(
     () => (isNonBillable ? validateMrfClientFields(values) : null),
     [values, isNonBillable],
@@ -276,7 +291,7 @@ export function MRFForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
-    await onSubmit(values)
+    await onSubmit(normalizeClientRequestedValues(values))
   }
 
   return (
@@ -287,20 +302,45 @@ export function MRFForm({
         <ErrorState message={`Department lookup failed. Department selects are disabled. ${departmentLookupError}`} />
       ) : null}
 
+      {/* Client request auto-fields summary row */}
+      {isClientRequested ? (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-brand-200 bg-gradient-to-r from-brand-50 to-brand-100/50 px-4 py-3 dark:border-brand-800 dark:from-brand-950 dark:to-brand-900/50">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-brand-600 dark:text-brand-400">Billing</span>
+            <span className="text-sm font-bold text-brand-800 dark:text-brand-200">Billable</span>
+          </div>
+          <div className="h-4 w-px bg-brand-300 dark:bg-brand-700" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-brand-600 dark:text-brand-400">Requester</span>
+            <span className="text-sm font-bold text-brand-800 dark:text-brand-200">Client</span>
+          </div>
+          <div className="h-4 w-px bg-brand-300 dark:bg-brand-700" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-brand-600 dark:text-brand-400">Visibility</span>
+            <span className="text-sm font-bold text-brand-800 dark:text-brand-200">Client</span>
+          </div>
+          <span className="ml-auto rounded-full bg-brand-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm dark:bg-brand-500">
+            Auto
+          </span>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <Select
-          id="mrf_billing_type"
-          label="Billing type"
-          value={values.billing_type}
-          onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
-          disabled={submitting}
-        >
-          {BILLING_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </Select>
+        {!isClientRequested ? (
+          <Select
+            id="mrf_billing_type"
+            label="Billing type"
+            value={values.billing_type}
+            onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
+            disabled={submitting}
+          >
+            {BILLING_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         <Select
           id="mrf_type"
           label="MRF type"
@@ -308,7 +348,7 @@ export function MRFForm({
           onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
           disabled={submitting}
         >
-          {MRF_TYPES.map((t) => (
+          {mrfTypeOptions.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
             </option>
@@ -382,20 +422,14 @@ export function MRFForm({
         </p>
       </div>
 
-      {clientFacingRequester ? (
-        <div className="rounded-panel border border-app-border bg-app-muted/40 px-3 py-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Requested by</p>
-          <p className="mt-1 text-sm font-medium text-app-text">Client</p>
-          <p className="mt-1 text-xs text-app-secondary">
-            Client users raise manpower requests as client requests. Internal request types are available only to internal teams.
-          </p>
-        </div>
-      ) : (
+      {!clientFacingRequester ? (
         <Select
           id="mrf_requested_by_type"
           label="Requested by type"
           value={values.requested_by_type}
-          onChange={(e) => setValues((v) => ({ ...v, requested_by_type: e.target.value as RequestedByType }))}
+          onChange={(e) =>
+            setValues((v) => normalizeClientRequestedValues({ ...v, requested_by_type: e.target.value as RequestedByType }))
+          }
           disabled={submitting}
         >
           {REQUESTER_TYPES.map((t) => (
@@ -404,7 +438,7 @@ export function MRFForm({
             </option>
           ))}
         </Select>
-      )}
+      ) : null}
 
       {!canReadBudget && initialMRF?.budget_plan != null && (initialMRF.budget_plan_name || initialMRF.budget_plan_code) ? (
         <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm text-app-secondary">
@@ -465,30 +499,15 @@ export function MRFForm({
         </>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Input
-          id="mrf_required_by_date"
-          label="Required by date"
-          type="date"
-          value={values.required_by_date}
-          onChange={(e) => setValues((v) => ({ ...v, required_by_date: e.target.value }))}
-          disabled={submitting}
-          error={requiredByError ?? undefined}
-        />
-        <Select
-          id="mrf_status"
-          label="Status"
-          value={values.status}
-          onChange={(e) => setValues((v) => ({ ...v, status: e.target.value as MRFStatus }))}
-          disabled={submitting}
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <Input
+        id="mrf_required_by_date"
+        label="Required by date"
+        type="date"
+        value={values.required_by_date}
+        onChange={(e) => setValues((v) => ({ ...v, required_by_date: e.target.value }))}
+        disabled={submitting}
+        error={requiredByError ?? undefined}
+      />
 
       <MRFClientFormFields
         values={values}
@@ -512,15 +531,17 @@ export function MRFForm({
         />
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-app-secondary">
-        <input
-          type="checkbox"
-          checked={values.client_visible}
-          onChange={(e) => setValues((v) => ({ ...v, client_visible: e.target.checked }))}
-          disabled={submitting}
-        />
-        Client visible
-      </label>
+      {!isClientRequested ? (
+        <label className="flex items-center gap-2 text-sm text-app-secondary">
+          <input
+            type="checkbox"
+            checked={values.client_visible}
+            onChange={(e) => setValues((v) => ({ ...v, client_visible: e.target.checked }))}
+            disabled={submitting}
+          />
+          Client visible
+        </label>
+      ) : null}
 
       <button type="submit" hidden />
       {mode === 'edit' ? (
@@ -545,7 +566,6 @@ export function mrfFormValuesToWritePayload(values: MRFFormValues, mode: 'create
     required_by_date: values.required_by_date || null,
     reason: values.reason,
     client_visible: values.client_visible,
-    status: values.status,
     budget_plan: bp ? Number(bp) : null,
     ...clientFieldsToWritePayload(values, mode),
   }

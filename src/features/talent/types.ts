@@ -147,10 +147,146 @@ export interface CandidateEducationRow {
 export interface ParsedResumeRow {
   id: number
   resume: number
+  parsed_json?: unknown
+  normalized_json?: unknown
   summary?: string | null
   career_level?: string | null
   primary_domain?: string | null
+  validation_errors?: unknown
+  missing_fields?: unknown
   confidence?: string | number | null
   created_at?: string
   updated_at?: string
+}
+
+export interface CandidateQueueSummary {
+  id: number
+  full_name: string | null
+  phone: string
+  email: string
+  lifecycle_status: string
+}
+
+export interface ParsedResumeSummary {
+  id: number
+  confidence: string | number | null
+  career_level: string | null
+  primary_domain: string | null
+  validation_errors: unknown
+  missing_fields: unknown
+}
+
+/** GET /api/talent/resumes/review-queue/ */
+export interface ResumeReviewQueueItem {
+  id: number
+  original_filename?: string | null
+  status?: string
+  manual_review_reason?: string | null
+  error_message?: string | null
+  parser_engine?: string | null
+  parser_confidence?: string | number | null
+  extraction_engine?: string | null
+  extraction_confidence?: string | number | null
+  uploaded_at?: string | null
+  source_type?: string | null
+  uploaded_by?: number | null
+  candidate_summary?: CandidateQueueSummary | null
+  parsed_resume_summary?: ParsedResumeSummary | null
+}
+
+/** GET /api/talent/resumes/{id}/review-detail/ */
+export interface ResumeReviewDetail {
+  id: number
+  original_filename?: string | null
+  content_type?: string | null
+  size_bytes?: number | null
+  status?: string
+  manual_review_reason?: string | null
+  error_message?: string | null
+  parser_engine?: string | null
+  parser_confidence?: string | number | null
+  extraction_engine?: string | null
+  extraction_confidence?: string | number | null
+  raw_text?: string | null
+  cleaned_text?: string | null
+  uploaded_at?: string | null
+  source_type?: string | null
+  candidate?: CandidateRow | null
+  parsed_resume?: ParsedResumeRow | null
+  parsed_skills?: CandidateSkillRow[]
+  parsed_experience?: CandidateExperienceRow[]
+  parsed_education?: CandidateEducationRow[]
+}
+
+/** POST apply-review - candidate sub-object */
+export interface ApplyReviewCandidateInput {
+  first_name?: string
+  middle_name?: string
+  last_name?: string
+  email?: string
+  phone?: string
+  current_role?: string
+  current_company?: string
+  current_location?: string
+  total_experience_years?: string | number | null
+  expected_ctc?: string | number | null
+  current_ctc?: string | number | null
+  notice_period_days?: number | null
+}
+
+export interface ApplyReviewSkillInput {
+  skill_name: string
+  years_experience?: string | number | null
+  proficiency?: 'beginner' | 'intermediate' | 'advanced' | 'expert' | ''
+}
+
+export interface ApplyReviewExperienceInput {
+  job_title?: string
+  company_name?: string
+  industry?: string
+  start_date?: string | null
+  end_date?: string | null
+  is_current?: boolean
+  duration_months?: number | null
+  description?: string
+  responsibilities?: string[]
+}
+
+export interface ApplyReviewEducationInput {
+  degree?: string
+  specialization?: string
+  institute?: string
+  start_year?: number | null
+  end_year?: number | null
+}
+
+/** POST /api/talent/resumes/{id}/apply-review/ */
+export interface ApplyReviewPayload {
+  candidate?: ApplyReviewCandidateInput
+  skills?: ApplyReviewSkillInput[]
+  experience?: ApplyReviewExperienceInput[]
+  education?: ApplyReviewEducationInput[]
+  review_note?: string
+}
+
+/** POST /api/talent/resumes/{id}/resolve-duplicate/ */
+export interface DuplicateResolutionPayload {
+  resolution: 'link_existing' | 'keep_separate' | 'mark_duplicate'
+  candidate?: number | null
+  note?: string
+}
+
+/** Returned by apply-review, resolve-duplicate, mark-reviewed audit endpoints */
+export interface TalentResumeReviewRow {
+  id: number
+  resume: number
+  candidate: number | null
+  reviewed_by: number | null
+  reviewed_by_name: string | null
+  review_type: string
+  previous_status: string
+  new_status: string
+  review_note: string
+  correction_payload: unknown
+  created_at: string
 }

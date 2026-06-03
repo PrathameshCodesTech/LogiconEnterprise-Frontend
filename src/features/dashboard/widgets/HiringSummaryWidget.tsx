@@ -37,7 +37,7 @@ export function HiringSummaryWidget({ data }: HiringSummaryWidgetProps) {
       title="Hiring"
       description={`${formatCount(application_count)} application${application_count !== 1 ? 's' : ''} · ${formatCount(demand_count)} open demand${demand_count !== 1 ? 's' : ''}.`}
       action={
-        <WidgetDrilldownAction to={drilldowns?.all} label="View applications" fallbackTo="/hiring-applications" />
+        <WidgetDrilldownAction to={drilldowns?.all} label="View applications" fallbackTo="/hiring/applications" />
       }
     >
       <div className="space-y-4">

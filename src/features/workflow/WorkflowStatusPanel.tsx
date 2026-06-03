@@ -58,7 +58,6 @@ export function WorkflowStatusPanel({
   configCheckButtonLabel?: string
 }) {
   const wf = workflowStatus ?? 'not_started'
-  const canStartHere = canStart && wf === 'not_started' && !startDisabled
   const startLabel = startButtonLabel ?? 'Start workflow'
   const startingLabel = startLabel === 'Send for approval' ? 'Sending…' : 'Starting…'
   const checkLabel = configCheckButtonLabel ?? 'Check setup'
@@ -99,8 +98,8 @@ export function WorkflowStatusPanel({
             {checkingConfig ? 'Checking…' : checkLabel}
           </Button>
         ) : null}
-        {canStartHere ? (
-          <Button className="min-h-9" disabled={starting} onClick={onStartWorkflow}>
+        {canStart && wf === 'not_started' ? (
+          <Button className="min-h-9" disabled={starting || !!startDisabled} onClick={onStartWorkflow}>
             {starting ? startingLabel : startLabel}
           </Button>
         ) : null}

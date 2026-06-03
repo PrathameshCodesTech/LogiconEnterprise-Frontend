@@ -10,10 +10,12 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { TaskStatusBadge } from '@/features/workflowTasks/TaskStatusBadge'
 import { WorkflowTaskDrawer } from '@/features/workflowTasks/WorkflowTaskDrawer'
+import { NotificationBanner } from '@/features/notifications/NotificationBanner'
 
 function targetKindLabel(targetType: WorkflowMyTask['target_type']): string {
   if (targetType === 'mrf') return 'MRF'
-  if (targetType === 'client_onboarding') return 'Client onboarding'
+  if (targetType === 'client_onboarding' || targetType === 'mobilisation') return 'Mobilisation'
+  if (targetType === 'sales_proposal') return 'Sales proposal'
   return targetType
 }
 
@@ -89,6 +91,8 @@ export function MyTasksPage() {
         onClose={() => setSelectedStepId(null)}
         onActionComplete={() => void load()}
       />
+
+      <NotificationBanner area="workflow" />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

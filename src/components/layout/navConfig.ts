@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Database,
   FileText,
+  FileScan,
   FormInput,
   Handshake,
   Inbox,
@@ -15,12 +16,14 @@ import {
   QrCode,
   Settings2,
   Shield,
+  SlidersHorizontal,
+  TrendingUp,
   Truck,
   UserCircle,
   Users,
   Wallet,
 } from 'lucide-react'
-import { CAP, DEPLOYMENT_ANY, MASTERS_ANY } from '@/lib/capabilities'
+import { CAP, MASTERS_ANY } from '@/lib/capabilities'
 
 export interface NavItem {
   path: string
@@ -52,16 +55,51 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'Sales',
+    items: [
+      {
+        path: '/sales/dashboard',
+        label: 'Sales dashboard',
+        icon: TrendingUp,
+        requiredCapabilities: [CAP.SALES_LEAD_READ],
+      },
+      {
+        path: '/sales/leads',
+        label: 'Sales leads',
+        icon: Briefcase,
+        requiredCapabilities: [CAP.SALES_LEAD_READ],
+      },
+      {
+        path: '/sales/operations-surveys',
+        label: 'Operations surveys',
+        icon: ClipboardList,
+        requiredCapabilities: [CAP.SALES_SURVEY_READ],
+      },
+      {
+        path: '/sales/component-rules',
+        label: 'Component rules',
+        icon: SlidersHorizontal,
+        requiredCapabilities: [CAP.SALES_PROPOSAL_READ],
+      },
+    ],
+  },
+  {
     label: 'Sales & setup',
     items: [
       {
-        path: '/client-onboarding',
-        label: 'Client onboarding',
+        path: '/mobilisation',
+        label: 'Mobilisation',
         icon: Handshake,
-        requiredCapabilities: [CAP.CLIENT_ONBOARDING_READ],
+        requiredCapabilities: [CAP.MOBILISATION_READ],
       },
       { path: '/clients', label: 'Clients', icon: Building2, requiredCapabilities: [CAP.CLIENT_READ] },
       { path: '/sites', label: 'Sites', icon: MapPin, requiredCapabilities: [CAP.SITE_READ] },
+      {
+        path: '/departments',
+        label: 'Departments',
+        icon: Building2,
+        requiredCapabilities: [CAP.DEPARTMENT_READ],
+      },
       {
         path: '/site-role-requirements',
         label: 'Site role requirements',
@@ -81,6 +119,12 @@ export const navGroups: NavGroup[] = [
     label: 'Candidate intake',
     items: [
       { path: '/qr-campaigns', label: 'QR campaigns', icon: QrCode, requiredCapabilities: [CAP.CAMPAIGN_READ] },
+      {
+        path: '/talent/resume-review',
+        label: 'Resume review',
+        icon: FileScan,
+        requiredCapabilities: [CAP.RESUME_READ],
+      },
       {
         path: '/form-builder',
         label: 'Form builder',
@@ -111,19 +155,19 @@ export const navGroups: NavGroup[] = [
     label: 'Hiring & deployment',
     items: [
       {
-        path: '/hiring-pipeline',
+        path: '/hiring/pipeline',
         label: 'Hiring pipeline',
         icon: KanbanSquare,
         requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
       },
       {
-        path: '/hiring-demands',
+        path: '/hiring/demands',
         label: 'Hiring demands',
         icon: ClipboardList,
         requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
       },
       {
-        path: '/hiring-applications',
+        path: '/hiring/applications',
         label: 'Hiring applications',
         icon: Briefcase,
         requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
@@ -135,10 +179,34 @@ export const navGroups: NavGroup[] = [
         requiredCapabilities: [CAP.CANDIDATE_READ],
       },
       {
-        path: '/deployment',
-        label: 'Deployment',
+        path: '/hiring/client-review',
+        label: 'Client review',
+        icon: ClipboardList,
+        requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
+      },
+      {
+        path: '/hiring/offers',
+        label: 'Offers',
+        icon: FileText,
+        requiredCapabilities: [CAP.OFFER_READ],
+      },
+      {
+        path: '/deployment/employees',
+        label: 'Employees',
+        icon: Users,
+        requiredCapabilities: [CAP.EMPLOYEE_READ],
+      },
+      {
+        path: '/deployment/site-deployments',
+        label: 'Site deployments',
         icon: Truck,
-        requiredCapabilities: [...DEPLOYMENT_ANY],
+        requiredCapabilities: [CAP.SITE_DEPLOYMENT_READ],
+      },
+      {
+        path: '/deployment/history',
+        label: 'Deployment history',
+        icon: ClipboardList,
+        requiredCapabilities: [CAP.DEPLOYMENT_READ],
       },
     ],
   },

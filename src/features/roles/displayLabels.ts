@@ -30,7 +30,7 @@ export function permissionAreaLabel(resource: string): string {
     mrf: 'Manpower requests',
     workflow: 'Approvals',
     workflow_config: 'Approval setup',
-    client_onboarding: 'Client onboarding',
+    client_onboarding: 'Mobilisation',
     department: 'Departments',
     campaign: 'Campaigns',
     submission: 'Intake submissions',
@@ -42,7 +42,7 @@ export function permissionAreaLabel(resource: string): string {
     deployment: 'Deployment',
     core: 'Core',
     access: 'Access',
-    onboarding: 'Onboarding',
+    onboarding: 'Mobilisation',
   }
   return map[resource] ?? resource.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }

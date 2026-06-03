@@ -2,7 +2,7 @@
 import axios from 'axios'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
-import { deleteMRF, getMRF, getMRFReadiness, updateMRF } from '@/api/mrf'
+import { deleteMRF, getMRF, getMRFReadiness } from '@/api/mrf'
 import { departmentToFormOption, listDepartments, type DepartmentOption, type DepartmentRow } from '@/api/departments'
 import {
   getMRFWorkflowConfigCheck,
@@ -16,11 +16,11 @@ import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Drawer } from '@/components/ui/Drawer'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
-import { MRFForm, mrfFormValuesToWritePayload, type MRFFormValues, type SiteOption } from '@/features/mrf/MRFForm'
+import type { SiteOption } from '@/features/mrf/MRFForm'
+import { MRFCreateWorkspaceDrawer } from '@/features/mrf/MRFCreateWorkspaceDrawer'
 import { MRFLineItemsTable } from '@/features/mrf/MRFLineItemsTable'
 import { MRFClientFormDisplay } from '@/features/mrf/MRFClientFormDisplay'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
@@ -85,9 +85,9 @@ export function MRFDetailPage() {
   )
 
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [formSubmitting, setFormSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const formId = useMemo(() => `mrf-edit-${mrfId}`, [mrfId])
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const [wfInstance, setWfInstance] = useState<WorkflowInstance | null>(null)
   const [wfInstanceLoading, setWfInstanceLoading] = useState(false)
@@ -383,41 +383,30 @@ export function MRFDetailPage() {
 
   function openEdit() {
     if (!canUpdate) return
-    setFormError(null)
     setDrawerOpen(true)
   }
 
   function closeDrawer() {
     setDrawerOpen(false)
-    setFormSubmitting(false)
-    setFormError(null)
-  }
-
-  async function submit(values: MRFFormValues) {
-    if (!row) return
-    setFormSubmitting(true)
-    setFormError(null)
-    try {
-      const updated = await updateMRF(row.id, mrfFormValuesToWritePayload(values, 'edit'))
-      setRow(updated)
-      await loadReadiness(updated)
-      closeDrawer()
-    } catch (e: unknown) {
-      setFormError(parseApiError(e, 'Save failed').message)
-    } finally {
-      setFormSubmitting(false)
-    }
+    void reloadMrfAndWorkflow()
   }
 
   async function handleDelete() {
     if (!row || !canDelete) return
-    const ok = window.confirm('Delete this MRF? This cannot be undone.')
-    if (!ok) return
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      setDeleteError(null)
+      return
+    }
+    setDeleteBusy(true)
+    setDeleteError(null)
     try {
       await deleteMRF(row.id)
       navigate('/mrf')
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Delete failed').message)
+      setDeleteError(parseApiError(e, 'Delete failed').message)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -460,12 +449,28 @@ export function MRFDetailPage() {
               </Button>
             ) : null}
             {canDelete ? (
-              <Button variant="danger" className="min-h-9 px-2" onClick={handleDelete} aria-label="Delete MRF" title="Delete">
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </Button>
+              deleteConfirm ? (
+                <>
+                  <Button variant="secondary" className="min-h-9 px-3" onClick={() => setDeleteConfirm(false)} disabled={deleteBusy}>
+                    Cancel
+                  </Button>
+                  <Button variant="danger" className="min-h-9 px-3" onClick={handleDelete} disabled={deleteBusy}>
+                    {deleteBusy ? 'Deleting...' : 'Confirm delete'}
+                  </Button>
+                </>
+              ) : (
+                <Button variant="danger" className="min-h-9 px-2" onClick={handleDelete} aria-label="Delete MRF" title="Delete">
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                </Button>
+              )
             ) : null}
           </div>
         </div>
+        {deleteError ? (
+          <div className="mt-3">
+            <ErrorState message={deleteError} />
+          </div>
+        ) : null}
       </div>
 
       <MRFClientFormDisplay row={row} />
@@ -694,41 +699,23 @@ export function MRFDetailPage() {
         onSuccess={() => reloadMrfAndWorkflow()}
       />
 
-      <Drawer
-        open={drawerOpen}
-        title="Edit MRF"
-        description="Update MRF details."
-        onClose={closeDrawer}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="secondary" onClick={closeDrawer} disabled={formSubmitting}>
-              Cancel
-            </Button>
-            <Button type="submit" form={formId} disabled={formSubmitting || !!sitesError}>
-              {formSubmitting ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        }
-      >
-        <MRFForm
-          key={`mrf-edit-${row.id}`}
-          formId={formId}
-          mode="edit"
+      {drawerOpen ? (
+        <MRFCreateWorkspaceDrawer
+          open={drawerOpen}
           initialMRF={row}
+          onClose={closeDrawer}
+          onFinished={() => {
+            void reloadMrfAndWorkflow()
+          }}
           siteOptions={siteOptions}
           departmentOptions={departmentOptions}
           departmentsLoading={departmentsLoading}
-          departmentLookupError={departmentsError}
+          departmentsError={departmentsError}
           lookupError={sitesError}
           canReadBudget={canReadBudget}
-          submitting={formSubmitting}
-          errorMessage={formError}
-          onSubmit={submit}
         />
-      </Drawer>
+      ) : null}
     </div>
   )
 }
-
-
 

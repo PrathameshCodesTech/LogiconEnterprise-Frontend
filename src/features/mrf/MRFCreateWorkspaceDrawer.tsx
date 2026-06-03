@@ -38,6 +38,7 @@ export interface MRFCreateWorkspaceDrawerProps {
   open: boolean
   onClose: () => void
   onFinished?: () => void
+  initialMRF?: MRFRow | null
   siteOptions: SiteOption[]
   departmentOptions: DepartmentOption[]
   departmentsLoading: boolean
@@ -52,6 +53,7 @@ export function MRFCreateWorkspaceDrawer({
   open,
   onClose,
   onFinished,
+  initialMRF = null,
   siteOptions,
   departmentOptions,
   departmentsLoading,
@@ -85,6 +87,27 @@ export function MRFCreateWorkspaceDrawer({
 
   const isWorkflowNotStarted = !createdMrf?.workflow_status || createdMrf.workflow_status === 'not_started'
   const isReadyForApproval = readiness?.ok === true
+  const isEditMode = initialMRF != null
+
+  useEffect(() => {
+    if (!open) return
+    setCurrentStep('request')
+    setCreatedMrf(initialMRF)
+    setFormSubmitting(false)
+    setFormError(null)
+    setReadiness(null)
+    setReadinessLoading(false)
+    setReadinessError(null)
+    setLineItemsVersion(0)
+    setLineItemsOpenCreate(false)
+    setAvailableRoutes([])
+    setRoutesLoading(false)
+    setRoutesError(null)
+    setSelectedRouteId(null)
+    setStartBusy(false)
+    setStartError(null)
+    setWorkflowDone(false)
+  }, [open, initialMRF?.id])
 
   const siteForMrf = useMemo(
     () => (createdMrf ? siteOptions.find((s) => s.id === createdMrf.site) : undefined),
@@ -534,7 +557,7 @@ export function MRFCreateWorkspaceDrawer({
   return (
     <Drawer
       open={open}
-      title="Create MRF"
+      title={isEditMode ? 'Edit MRF' : 'Create MRF'}
       description="Request details → Line items → Readiness → Approval"
       onClose={onClose}
       panelClassName="max-w-[940px]"

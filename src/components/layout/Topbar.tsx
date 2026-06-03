@@ -1,6 +1,7 @@
 ﻿import { CalendarDays, LogOut, Menu } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
+import { NotificationBell } from '@/features/notifications/NotificationBell'
 import { cn } from '@/lib/cn'
 
 const wordmarkStyle = { fontFamily: "'Montserrat', sans-serif", letterSpacing: '0.18em' } as const
@@ -85,6 +86,7 @@ function HeaderActions({ onLogout, compact = false }: { onLogout: () => void; co
   return (
     <div className="flex shrink-0 items-center gap-2 sm:gap-3">
       {compact ? <HeaderDatePlain compact /> : <HeaderDatePlain />}
+      <NotificationBell compact={compact} />
       <ThemeToggle />
       <Button
         type="button"

@@ -202,7 +202,7 @@ export function ClientOnboardingListPage() {
       if (drawerMode === 'create') {
         const created = await createClientOnboardingRequest(payload)
         closeDrawer()
-        navigate(`/client-onboarding/${created.id}`)
+        navigate(`/mobilisation/${created.id}`)
         return
       }
       if (editing) {
@@ -219,7 +219,7 @@ export function ClientOnboardingListPage() {
 
   async function handleDelete(r: ClientOnboardingRow) {
     if (!canDelete) return
-    const ok = window.confirm('Delete this client onboarding request? This cannot be undone.')
+    const ok = window.confirm('Delete this mobilisation setup request? This cannot be undone.')
     if (!ok) return
     try {
       await deleteClientOnboardingRequest(r.id)
@@ -235,7 +235,7 @@ export function ClientOnboardingListPage() {
         <button
           key={r.id}
           type="button"
-          onClick={() => navigate(`/client-onboarding/${r.id}`)}
+          onClick={() => navigate(`/mobilisation/${r.id}`)}
           className="w-full rounded-panel border border-app-border bg-app-surface p-4 text-left shadow-panel hover:bg-app-muted"
         >
           <div className="flex items-start justify-between gap-3">
@@ -265,7 +265,7 @@ export function ClientOnboardingListPage() {
     <div className="w-full space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-app-text">Client onboarding</h2>
+          <h2 className="text-lg font-semibold text-app-text">Mobilisation</h2>
           <p className="text-sm text-app-secondary">Sales-led client and site expansion requests with approval workflow.</p>
         </div>
         {canCreate ? (
@@ -294,7 +294,7 @@ export function ClientOnboardingListPage() {
                 onChange={(e) => updateParam({ search: e.target.value })}
                 placeholder="Search summary or proposed client name"
                 className="min-h-10 w-full rounded-panel border border-app-border bg-app-surface pl-10 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                aria-label="Search onboarding requests"
+                aria-label="Search mobilisation requests"
               />
             </div>
           </div>
@@ -324,7 +324,7 @@ export function ClientOnboardingListPage() {
 
           <Select
             id="co_onboarding_type"
-            label="Onboarding type"
+            label="Mobilisation type"
             value={onboarding_type}
             onChange={(e) => updateParam({ onboarding_type: e.target.value || null })}
           >
@@ -362,11 +362,11 @@ export function ClientOnboardingListPage() {
       </div>
 
       {loading ? (
-        <Spinner label="Loading onboarding requests..." />
+        <Spinner label="Loading mobilisation requests..." />
       ) : error ? (
         <ErrorState message={error} />
       ) : rows.length === 0 ? (
-        <EmptyState title="No requests found" description="Try adjusting filters or create a new onboarding request." />
+        <EmptyState title="No requests found" description="Try adjusting filters or create a new mobilisation setup." />
       ) : (
         <>
           {mobileCards}
@@ -390,7 +390,7 @@ export function ClientOnboardingListPage() {
                   <TR
                     key={r.id}
                     className="cursor-pointer hover:bg-app-muted"
-                    onClick={() => navigate(`/client-onboarding/${r.id}`)}
+                    onClick={() => navigate(`/mobilisation/${r.id}`)}
                   >
                     <TD className="py-2 font-mono text-xs text-app-secondary">#{r.id}</TD>
                     <TD className="py-2 text-sm text-app-secondary">{displayOnboardingClient(r, clientById)}</TD>
@@ -457,11 +457,11 @@ export function ClientOnboardingListPage() {
 
       <Drawer
         open={drawerOpen}
-        title={drawerMode === 'create' ? 'Create onboarding request' : 'Edit onboarding request'}
+        title={drawerMode === 'create' ? 'New mobilisation setup' : 'Edit mobilisation setup'}
         description={
           drawerMode === 'create'
             ? 'Creates a draft request. Workflow is started from the detail page.'
-            : 'Update onboarding details. Status is managed by workflow and transitions.'
+            : 'Update mobilisation details. Status is managed by workflow and transitions.'
         }
         onClose={closeDrawer}
         footer={

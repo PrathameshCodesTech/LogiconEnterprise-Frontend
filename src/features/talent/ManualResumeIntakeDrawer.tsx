@@ -172,7 +172,7 @@ export function ManualResumeIntakeDrawer({
             </p>
             {done.hiring_application ? (
               <p className="mt-2 text-app-secondary">
-                <Link className="font-medium text-brand-700 underline" to={`/hiring-applications/${done.hiring_application.id}`}>
+                <Link className="font-medium text-brand-700 underline" to={`/hiring/applications/${done.hiring_application.id}`}>
                   Open application
                 </Link>
               </p>

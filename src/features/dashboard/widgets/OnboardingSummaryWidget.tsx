@@ -29,12 +29,12 @@ export function OnboardingSummaryWidget({ data }: OnboardingSummaryWidgetProps) 
   return (
     <DashboardWidgetCard
       id="onboarding-summary"
-      title="Client onboarding"
-      description={`${total} onboarding request${total !== 1 ? 's' : ''} in scope.`}
+      title="Mobilisation"
+      description={`${total} mobilisation request${total !== 1 ? 's' : ''} in scope.`}
       action={
-        <WidgetDrilldownAction to={drilldowns?.all} label="View onboarding" fallbackTo="/client-onboarding" />
+        <WidgetDrilldownAction to={drilldowns?.all} label="View mobilisation" fallbackTo="/mobilisation" />
       }
-      empty={total === 0 ? 'No onboarding records in scope.' : undefined}
+      empty={total === 0 ? 'No mobilisation records in scope.' : undefined}
     >
       <div className="space-y-4">
         {finalization_failed > 0 ? (
@@ -103,7 +103,7 @@ export function OnboardingSummaryWidget({ data }: OnboardingSummaryWidgetProps) 
                     {onboardingStatusLabel(ob.status)}
                   </Badge>
                   <Link
-                    to={`/client-onboarding/${ob.id}`}
+                    to={`/mobilisation/${ob.id}`}
                     className="truncate text-app-text hover:text-brand-600 hover:underline"
                   >
                     {ob.client_name || `#${ob.id}`}

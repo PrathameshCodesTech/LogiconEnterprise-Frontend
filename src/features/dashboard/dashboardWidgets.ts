@@ -29,7 +29,7 @@ export const DASHBOARD_WIDGETS: DashboardWidgetConfig[] = [
   },
   {
     id: 'client-onboarding-pipeline',
-    title: 'Client onboarding',
+    title: 'Mobilisation',
     description: 'Sales-led expansion requests.',
     section: 'operations',
     size: 'medium',

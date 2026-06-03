@@ -10,7 +10,11 @@ export function Table({ children, className }: { children: ReactNode; className?
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return <thead className="bg-app-muted text-xs font-semibold uppercase tracking-wide text-app-subtle">{children}</thead>
+  return (
+    <thead className="border-b-2 border-brand-500 bg-app-surface text-xs font-bold uppercase tracking-wider text-brand-700 dark:border-brand-400 dark:text-brand-300">
+      {children}
+    </thead>
+  )
 }
 
 export function TH({ children, className }: { children: ReactNode; className?: string }) {

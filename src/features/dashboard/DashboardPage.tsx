@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { getDashboardSummary } from '@/api/dashboard'
 import type { DashboardSummaryResponse } from '@/features/dashboard/types'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -37,6 +38,18 @@ function hasTalentData(talent: DashboardSummaryResponse['sections']['talent']): 
     hasAnyCount(talent.charts?.by_availability) ||
     hasAnyCount(talent.charts?.top_skills)
   )
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
+function getFirstName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/)
+  return parts[0] ?? fullName
 }
 
 // ─── DashboardPage ────────────────────────────────────────────────────────────
@@ -84,8 +97,9 @@ export function DashboardPage() {
         <button
           type="button"
           onClick={fetchSummary}
-          className="inline-flex min-h-9 items-center rounded-panel border border-app-border bg-app-muted px-3 py-1.5 text-xs font-medium text-app-text hover:border-brand-600 hover:text-brand-700"
+          className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-app-border bg-app-surface px-4 py-2 text-sm font-medium text-app-text shadow-sm hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950"
         >
+          <RefreshCw className="h-4 w-4" />
           Retry
         </button>
       </div>
@@ -96,31 +110,34 @@ export function DashboardPage() {
 
   const { audience, user, sections } = data
   const isClient = audience === 'client'
+  const firstName = getFirstName(user.username)
 
   return (
     <div className="w-full space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-app-border pb-4">
+      {/* Welcome Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-app-text">Dashboard</h1>
-          <p className="mt-1 text-sm text-app-secondary">Work and operational signals for your access.</p>
-          <p className="mt-1 text-xs text-app-subtle">
-            <span className="text-app-text">{user.username}</span>
-            {user.email ? <span className="text-app-secondary"> · {user.email}</span> : null}
-            <span className="text-app-subtle"> · {user.user_type}</span>
+          <h1 className="text-2xl font-bold text-app-text">
+            {getGreeting()}, {firstName}!
+          </h1>
+          <p className="mt-1 text-sm text-app-secondary">
+            Here's your operational overview for today
           </p>
         </div>
         <button
           type="button"
           onClick={fetchSummary}
           disabled={loading}
-          className="inline-flex min-h-9 items-center rounded-panel border border-app-border bg-app-muted px-3 py-1.5 text-xs font-medium text-app-text hover:border-brand-600 hover:text-brand-700 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-app-border bg-app-surface px-4 py-2.5 text-sm font-medium text-app-text shadow-sm transition-all hover:border-brand-500 hover:bg-brand-50 disabled:opacity-50 dark:hover:bg-brand-950"
         >
-          {loading ? 'Refreshing…' : 'Refresh'}
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Refreshing...' : 'Refresh'}
         </button>
-      </header>
+      </div>
 
+      {/* Widgets Grid */}
       {isClient ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {/* Row 1: My work + Client overview */}
           <div className={SPAN_SINGLE}>
             <MyWorkWidget data={sections.my_work} />
@@ -143,7 +160,7 @@ export function DashboardPage() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className={SPAN_SINGLE}>
             <MyWorkWidget data={sections.my_work} />
           </div>

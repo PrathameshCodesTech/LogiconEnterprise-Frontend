@@ -1,11 +1,7 @@
-﻿import {
-  finalizationStatusLabel,
-  proposedUserInviteStatusLabel,
-  proposedUserScopeLabel,
-  proposedUserTypeLabel,
-} from '@/features/clientOnboarding/types'
-import { ProposedBudgetSections } from '@/features/clientOnboarding/proposedBudgetUx'
-import type { WorkflowMyTask, WorkflowTaskClientOnboarding, WorkflowTaskOnboardingProposedSite } from '@/features/workflow/types'
+import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { ExternalLink } from 'lucide-react'
+import type { WorkflowMyTask, WorkflowTaskMobilisationSetup } from '@/features/workflow/types'
 import { Badge } from '@/components/ui/Badge'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import {
@@ -15,87 +11,132 @@ import {
   TaskMetricTile,
   TaskSummaryBand,
 } from '@/features/workflowTasks/TaskOverviewComponents'
-import {
-  activeBadge,
-  displayText,
-  formatDate,
-  formatMoney,
-  humanize,
-} from '@/features/workflowTasks/workflowTaskOnboardingViews'
+import { activeBadge, displayText, humanize } from '@/features/workflowTasks/workflowTaskOnboardingViews'
 
-function humanizeOnboardingType(code: string): string {
+function mobilisationFinalizationLabel(value: string | null | undefined): string {
+  if (!value || value === 'not_finalized') return 'Not finalized'
+  if (value === 'finalized') return 'Finalized'
+  if (value === 'failed') return 'Finalization failed'
+  return humanize(value)
+}
+
+function mobilisationTypeLabel(code: string): string {
   if (code === 'new_client') return 'New client'
   if (code === 'new_site_expansion') return 'New site expansion'
+  if (code === 'scope_expansion') return 'Scope expansion'
   return humanize(code)
 }
 
-function FieldBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-app-text">{value}</p>
-    </div>
-  )
-}
+type BadgeVariant = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention'
 
-type ObBadgeVariant = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention'
-
-function obStatusVariant(s: string): ObBadgeVariant {
-  if (s === 'approved') return 'success'
-  if (s === 'rejected' || s === 'cancelled') return 'danger'
-  if (s === 'submitted') return 'info'
-  if (s === 'pending_review' || s === 'review' || s === 'in_review') return 'attention'
+function statusVariant(status: string): BadgeVariant {
+  if (status === 'approved') return 'success'
+  if (status === 'rejected' || status === 'cancelled') return 'danger'
+  if (status === 'submitted') return 'info'
+  if (status === 'pending_review' || status === 'review' || status === 'in_review') return 'attention'
   return 'neutral'
 }
 
-export function OnboardingOverviewTab({
+function userTypeLabel(value: string | null | undefined): string {
+  if (value === 'client_admin') return 'Client admin'
+  if (value === 'client_site_user') return 'Site user'
+  if (value === 'site_supervisor') return 'Site supervisor'
+  if (value === 'client_user') return 'Client user'
+  return humanize(value)
+}
+
+function userScopeLabel(value: string | null | undefined): string {
+  if (value === 'client') return 'Client-level'
+  if (value === 'site') return 'Site-level'
+  return humanize(value)
+}
+
+function inviteStatusLabel(value: string | null | undefined): string {
+  if (value === 'not_sent') return 'Not sent'
+  if (value === 'sent') return 'Sent'
+  if (value === 'accepted') return 'Accepted'
+  if (value === 'failed') return 'Failed'
+  return humanize(value)
+}
+
+function siteName(row: { real_site_name?: string | null; real_site_code?: string | null }): string {
+  const name = row.real_site_name?.trim()
+  const code = row.real_site_code?.trim()
+  if (name && code) return `${name} (${code})`
+  return name || code || '-'
+}
+
+export function MobilisationOverviewTab({
   task,
-  ob,
+  setup,
+  detailUrl,
   onGoToAction,
 }: {
   task: WorkflowMyTask
-  ob: WorkflowTaskClientOnboarding
+  setup: WorkflowTaskMobilisationSetup
+  detailUrl?: string | null
   onGoToAction: () => void
 }) {
-  const isNewClient = ob.onboarding_type === 'new_client'
-  const clientDisplayName =
-    (isNewClient
-      ? ob.proposed_client_name?.trim()
-      : ob.client_name?.trim()) || '—'
+  const clientName = setup.client_name?.trim() || setup.source_sales_lead_name?.trim() || '-'
+  const departmentsCount = setup.proposed_departments?.length ?? 0
+  const usersCount = setup.proposed_users?.length ?? 0
+  const currentStatusVariant = statusVariant(setup.status)
+  const finalization = mobilisationFinalizationLabel(setup.finalization_status)
 
-  const sitesCount = ob.proposed_sites?.length ?? 0
-  const deptsCount = ob.proposed_departments?.length ?? 0
-  const rolesCount = ob.proposed_role_requirements?.length ?? 0
-  const usersCount = ob.proposed_users?.length ?? 0
+  const detailRows: { label: string; value: ReactNode }[] = [
+    { label: 'Mobilisation type', value: mobilisationTypeLabel(setup.mobilisation_type ?? setup.onboarding_type ?? '') },
+    { label: 'Client', value: clientName },
+    { label: 'Finalization', value: finalization },
+    {
+      label: 'Status',
+      value: <Badge variant={currentStatusVariant}>{humanize(setup.status)}</Badge>,
+    },
+    {
+      label: 'Requested by',
+      value: setup.requested_by_username?.trim() || '-',
+    },
+  ]
 
-  const statusLabel = humanize(ob.status)
-  const statusVariant = obStatusVariant(ob.status)
-  const finLabel = finalizationStatusLabel(ob.finalization_status)
+  if (setup.source_sales_lead_name?.trim()) {
+    detailRows.push({ label: 'Source lead', value: setup.source_sales_lead_name })
+  }
+
+  if (setup.source_proposal_version_number != null) {
+    detailRows.push({
+      label: 'Source proposal',
+      value: `v${setup.source_proposal_version_number}`,
+    })
+  }
 
   return (
     <div className="space-y-3">
-      {/* Summary band */}
       <TaskSummaryBand
-        title={`Onboarding #${ob.id}`}
-        subtitle={clientDisplayName !== '—' ? clientDisplayName : null}
+        title={`Mobilisation #${setup.id}`}
+        subtitle={clientName !== '-' ? clientName : null}
         badges={
           <>
             <Badge variant="info">{task.step_name}</Badge>
-            <Badge variant={statusVariant}>{statusLabel}</Badge>
-            <Badge variant="neutral">{finLabel}</Badge>
+            <Badge variant={currentStatusVariant}>{humanize(setup.status)}</Badge>
+            <Badge variant="neutral">{finalization}</Badge>
           </>
         }
       />
 
-      {/* Metric tiles */}
+      {detailUrl ? (
+        <Link
+          to={detailUrl}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          View full details
+        </Link>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <TaskMetricTile label="Proposed sites" value={sitesCount} />
-        <TaskMetricTile label="Departments" value={deptsCount} />
-        <TaskMetricTile label="Role requirements" value={rolesCount} />
+        <TaskMetricTile label="Departments" value={departmentsCount} />
         <TaskMetricTile label="Users" value={usersCount} />
       </div>
 
-      {/* Current approval card */}
       <TaskApprovalCard
         stepName={task.step_name}
         departmentName={task.assigned_department_name}
@@ -103,150 +144,17 @@ export function OnboardingOverviewTab({
         dueAt={task.due_at}
       />
 
-      {/* Onboarding details grid */}
-      <TaskInfoGrid
-        title="Onboarding details"
-        rows={[
-          { label: 'Onboarding type', value: humanizeOnboardingType(ob.onboarding_type) },
-          { label: 'Client', value: clientDisplayName },
-          { label: 'Finalization', value: finLabel },
-          {
-            label: 'Status',
-            value: <Badge variant={statusVariant}>{statusLabel}</Badge>,
-          },
-          {
-            label: 'Expected sites',
-            value: ob.expected_sites_count != null ? String(ob.expected_sites_count) : '—',
-          },
-          {
-            label: 'Requested by',
-            value: ob.requested_by_username?.trim() || '—',
-          },
-        ]}
-      />
+      <TaskInfoGrid title="Mobilisation details" rows={detailRows} />
 
-      {/* Action nudge */}
       <ActionNudge onGoToAction={onGoToAction} />
     </div>
   )
 }
 
-export function ClientTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const isNewClient = ob.onboarding_type === 'new_client'
-  if (isNewClient) {
-    return (
-      <div className="space-y-4">
-        <FieldBlock label="Proposed client name" value={displayText(ob.proposed_client_name)} />
-        <FieldBlock label="Proposed client code" value={displayText(ob.proposed_client_code)} />
-        <FieldBlock label="Contact name" value={displayText(ob.proposed_contact_name)} />
-        <FieldBlock label="Contact email" value={displayText(ob.proposed_contact_email)} />
-        <FieldBlock label="Contact phone" value={displayText(ob.proposed_contact_phone)} />
-        <FieldBlock label="Industry" value={displayText(ob.proposed_industry)} />
-        <FieldBlock label="Billing address" value={displayText(ob.proposed_billing_address)} />
-        <FieldBlock label="GST number" value={displayText(ob.proposed_gst_number)} />
-        <FieldBlock label="Summary" value={displayText(ob.summary)} />
-        <FieldBlock label="Notes" value={displayText(ob.notes)} />
-      </div>
-    )
-  }
-  const clientLabel =
-    ob.client_name?.trim() ?
-      ob.client != null ?
-        `${ob.client_name} (#${ob.client})`
-      : ob.client_name
-    : ob.client != null ?
-      `#${ob.client}`
-    : '-'
-  return (
-    <div className="space-y-4">
-      <FieldBlock label="Existing client" value={clientLabel} />
-      <FieldBlock label="Proposed setup summary" value={displayText(ob.summary)} />
-      <FieldBlock label="Notes" value={displayText(ob.notes)} />
-    </div>
-  )
-}
-
-
-function SiteCard({ site }: { site: WorkflowTaskOnboardingProposedSite }) {
-  return (
-    <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="font-medium text-app-text">
-          {displayText(site.name)}
-          {site.code?.trim() ? <span className="ml-1 font-mono text-xs text-app-secondary">({site.code})</span> : null}
-        </p>
-        {activeBadge(site.is_active)}
-      </div>
-      <p className="mt-2 text-xs text-app-secondary">
-        {displayText(site.city)}, {displayText(site.state)} {displayText(site.pincode)}
-      </p>
-      <p className="mt-1 text-xs text-app-secondary">{displayText(site.address)}</p>
-      <p className="mt-2 text-xs text-app-secondary">
-        Contact: {displayText(site.contact_person)} / {displayText(site.contact_phone)} / {displayText(site.contact_email)}
-      </p>
-      <p className="mt-1 text-xs text-app-secondary">Location area: {displayText(site.location_area_name)}</p>
-    </div>
-  )
-}
-
-export function SitesTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const sites = ob.proposed_sites ?? []
-  if (sites.length === 0) {
-    return <p className="text-sm text-app-secondary">No proposed sites found.</p>
-  }
-  return (
-    <div className="space-y-4">
-      <div className="hidden md:block overflow-x-auto rounded-panel border border-app-border">
-        <Table>
-          <THead>
-            <TR>
-              <TH className="py-2">Site</TH>
-              <TH className="py-2">Location</TH>
-              <TH className="py-2">Address</TH>
-              <TH className="py-2">Contact</TH>
-              <TH className="py-2">Location area</TH>
-              <TH className="py-2">Status</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {sites.map((site) => (
-              <TR key={site.id}>
-                <TD className="py-2 text-sm">
-                  <span className="font-medium text-app-text">{displayText(site.name)}</span>
-                  {site.code?.trim() ? (
-                    <span className="ml-1 font-mono text-xs text-app-secondary">({site.code})</span>
-                  ) : null}
-                </TD>
-                <TD className="py-2 text-xs text-app-secondary">
-                  {displayText(site.city)}, {displayText(site.state)} {displayText(site.pincode)}
-                </TD>
-                <TD className="py-2 text-xs text-app-secondary">{displayText(site.address)}</TD>
-                <TD className="py-2 text-xs text-app-secondary">
-                  {displayText(site.contact_person)}
-                  <br />
-                  {displayText(site.contact_phone)} / {displayText(site.contact_email)}
-                </TD>
-                <TD className="py-2 text-xs text-app-secondary">{displayText(site.location_area_name)}</TD>
-                <TD className="py-2">{activeBadge(site.is_active)}</TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </div>
-      <div className="space-y-3 md:hidden">
-        {sites.map((site) => (
-          <SiteCard key={site.id} site={site} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-
-export function DepartmentsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const rows = ob.proposed_departments ?? []
+export function MobilisationDepartmentsTab({ setup }: { setup: WorkflowTaskMobilisationSetup }) {
+  const rows = setup.proposed_departments ?? []
   if (rows.length === 0) {
-    return <p className="text-sm text-app-secondary">No proposed departments found.</p>
+    return <p className="text-sm text-app-secondary">No departments found.</p>
   }
   return (
     <div className="overflow-x-auto rounded-panel border border-app-border">
@@ -255,7 +163,7 @@ export function DepartmentsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboard
           <TR>
             <TH className="py-2">Department</TH>
             <TH className="py-2">Scope</TH>
-            <TH className="py-2">Proposed site</TH>
+            <TH className="py-2">Site</TH>
             <TH className="py-2">Description</TH>
             <TH className="py-2">Status</TH>
           </TR>
@@ -270,7 +178,7 @@ export function DepartmentsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboard
                 ) : null}
               </TD>
               <TD className="py-2 text-xs text-app-secondary">{humanize(row.scope_level)}</TD>
-              <TD className="py-2 text-xs text-app-secondary">{displayText(row.proposed_site_name)}</TD>
+              <TD className="py-2 text-xs text-app-secondary">{siteName(row)}</TD>
               <TD className="py-2 text-xs text-app-secondary">{displayText(row.description)}</TD>
               <TD className="py-2">{activeBadge(row.is_active)}</TD>
             </TR>
@@ -281,70 +189,10 @@ export function DepartmentsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboard
   )
 }
 
-export function RoleRequirementsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const rows = ob.proposed_role_requirements ?? []
-  if (rows.length === 0) {
-    return <p className="text-sm text-app-secondary">No proposed role requirements found.</p>
-  }
-  return (
-    <div className="overflow-x-auto rounded-panel border border-app-border">
-      <Table>
-        <THead>
-          <TR>
-            <TH className="py-2">Site</TH>
-            <TH className="py-2">Department</TH>
-            <TH className="py-2">Job role</TH>
-            <TH className="py-2">Headcount</TH>
-            <TH className="py-2">Billing</TH>
-            <TH className="py-2">Wages</TH>
-            <TH className="py-2">Effective</TH>
-            <TH className="py-2">Status</TH>
-          </TR>
-        </THead>
-        <TBody>
-          {rows.map((row) => (
-            <TR key={row.id}>
-              <TD className="py-2 text-xs text-app-secondary">{displayText(row.proposed_site_name)}</TD>
-              <TD className="py-2 text-xs text-app-secondary">{displayText(row.proposed_department_name)}</TD>
-              <TD className="py-2 text-sm">{displayText(row.job_role_name)}</TD>
-              <TD className="py-2 text-sm">{row.approved_headcount}</TD>
-              <TD className="py-2 text-xs text-app-secondary">
-                {humanize(row.billing_type)}
-                <br />
-                {formatMoney(row.billing_rate, null)}
-              </TD>
-              <TD className="py-2 text-xs text-app-secondary">
-                {formatMoney(row.wage_min, null)} - {formatMoney(row.wage_max, null)}
-                <br />
-                Shift: {displayText(row.shift_hours)} / {displayText(row.wage_category_name)}
-              </TD>
-              <TD className="py-2 text-xs text-app-secondary">
-                {formatDate(row.effective_from)} - {formatDate(row.effective_to)}
-              </TD>
-              <TD className="py-2">{activeBadge(row.is_active)}</TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
-    </div>
-  )
-}
-
-export function BudgetsTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const rows = ob.proposed_budgets ?? []
-  return (
-    <ProposedBudgetSections
-      budgets={rows}
-      title="Proposed budgets"
-      emptyMessage="No proposed budgets found."
-    />
-  )
-}
-
-export function UsersTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding }) {
-  const users = ob.proposed_users ?? []
+export function MobilisationUsersTab({ setup }: { setup: WorkflowTaskMobilisationSetup }) {
+  const users = setup.proposed_users ?? []
   if (users.length === 0) {
-    return <p className="text-sm text-app-secondary">No proposed users found.</p>
+    return <p className="text-sm text-app-secondary">No users found.</p>
   }
   return (
     <div className="overflow-x-auto rounded-panel border border-app-border">
@@ -364,34 +212,36 @@ export function UsersTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding })
           </TR>
         </THead>
         <TBody>
-          {users.map((u) => (
-            <TR key={u.id}>
+          {users.map((user) => (
+            <TR key={user.id}>
               <TD className="py-2 text-sm">
-                <span className="font-medium text-app-text">{displayText(u.full_name)}</span>
+                <span className="font-medium text-app-text">{displayText(user.full_name)}</span>
                 <br />
-                <span className="text-xs text-app-secondary">{displayText(u.email)}</span>
+                <span className="text-xs text-app-secondary">{displayText(user.email)}</span>
               </TD>
-              <TD className="py-2 text-xs text-app-secondary">{displayText(u.phone)}</TD>
-              <TD className="py-2 text-xs">{proposedUserTypeLabel(u.user_type)}</TD>
+              <TD className="py-2 text-xs text-app-secondary">{displayText(user.phone)}</TD>
+              <TD className="py-2 text-xs">{userTypeLabel(user.user_type)}</TD>
               <TD className="py-2 text-xs text-app-secondary">
-                {u.access_role_name?.trim() ?
-                  u.access_role_code?.trim() ?
-                    `${u.access_role_name} (${u.access_role_code})`
-                  : u.access_role_name
-                : displayText(u.access_role_code ?? (u.access_role != null ? `#${u.access_role}` : null))}
+                {user.access_role_name?.trim()
+                  ? user.access_role_code?.trim()
+                    ? `${user.access_role_name} (${user.access_role_code})`
+                    : user.access_role_name
+                  : displayText(user.access_role_code ?? (user.access_role != null ? `#${user.access_role}` : null))}
               </TD>
-              <TD className="py-2 text-xs">{proposedUserScopeLabel(u.scope_level)}</TD>
-              <TD className="py-2 text-xs text-app-secondary">{displayText(u.proposed_site_name)}</TD>
+              <TD className="py-2 text-xs">{userScopeLabel(user.scope_level)}</TD>
+              <TD className="py-2 text-xs text-app-secondary">{siteName(user)}</TD>
               <TD className="py-2">
-                {u.is_primary_contact ?
+                {user.is_primary_contact ? (
                   <Badge variant="info">Primary contact</Badge>
-                : <span className="text-xs text-app-subtle">—</span>}
+                ) : (
+                  <span className="text-xs text-app-subtle">-</span>
+                )}
               </TD>
-              <TD className="py-2 text-xs text-app-secondary">{proposedUserInviteStatusLabel(u.invite_status)}</TD>
+              <TD className="py-2 text-xs text-app-secondary">{inviteStatusLabel(user.invite_status)}</TD>
               <TD className="py-2 text-xs text-app-secondary">
-                {u.created_user != null && u.created_user > 0 ? `#${u.created_user}` : '—'}
+                {user.created_user != null && user.created_user > 0 ? `#${user.created_user}` : '-'}
               </TD>
-              <TD className="py-2">{activeBadge(u.is_active)}</TD>
+              <TD className="py-2">{activeBadge(user.is_active)}</TD>
             </TR>
           ))}
         </TBody>
@@ -399,4 +249,3 @@ export function UsersTabOnboarding({ ob }: { ob: WorkflowTaskClientOnboarding })
     </div>
   )
 }
-

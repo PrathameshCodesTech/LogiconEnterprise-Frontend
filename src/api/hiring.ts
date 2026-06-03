@@ -2,12 +2,24 @@ import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
 import type { CandidateRow } from '@/features/talent/types'
 import type {
+  BulkSendToClientReviewInput,
   CandidateMatchResultRow,
+  CandidatePoolResultRow,
+  ClientDecisionInput,
+  ClientReviewApplicationRow,
   HiringApplicationRow,
   HiringApplicationWriteInput,
+  HiringDeploymentConversionInput,
+  HiringDeploymentConversionResult,
   HiringDemandRow,
   MoveStageInput,
+  OfferActionInput,
+  OfferCreateInput,
+  OfferRow,
+  OfferUpdateInput,
   PipelineStageRow,
+  SendToClientReviewInput,
+  ShortlistCandidateInput,
 } from '@/features/hiring/types'
 
 export interface ListHiringDemandsParams {
@@ -124,4 +136,139 @@ export async function listCandidateMatchResults(
     },
   })
   return unwrapDrfResults<CandidateMatchResultRow>(res.data)
+}
+
+export async function sendApplicationToClientReview(id: number, payload: SendToClientReviewInput): Promise<{ result: string; application: HiringApplicationRow }> {
+  const res = await api.post(`/api/hiring/applications/${id}/send-to-client-review/`, payload)
+  return res.data as { result: string; application: HiringApplicationRow }
+}
+
+export async function recordClientDecision(id: number, payload: ClientDecisionInput): Promise<HiringApplicationRow> {
+  const res = await api.post(`/api/hiring/applications/${id}/client-decision/`, payload)
+  return res.data as HiringApplicationRow
+}
+
+export async function convertApplicationToDeployment(
+  id: number,
+  payload: HiringDeploymentConversionInput,
+): Promise<HiringDeploymentConversionResult> {
+  const res = await api.post(`/api/hiring/applications/${id}/convert-to-deployment/`, payload)
+  return res.data as HiringDeploymentConversionResult
+}
+
+export interface RankedCandidatePoolParams {
+  ranked?: 'true' | 'false'
+  min_score?: string | number
+  save_results?: 'true' | 'false'
+  skills?: string
+  min_experience?: string | number
+  max_experience?: string | number
+  location?: string
+  page?: number
+}
+
+export async function getRankedCandidatePool(
+  demandId: number,
+  params?: RankedCandidatePoolParams,
+): Promise<{ items: CandidatePoolResultRow[]; count?: number }> {
+  const res = await api.get(`/api/hiring/demands/${demandId}/candidate-pool/`, {
+    params: { ranked: 'true', ...params },
+  })
+  return unwrapDrfResults<CandidatePoolResultRow>(res.data)
+}
+
+export async function shortlistCandidateForDemand(
+  demandId: number,
+  payload: ShortlistCandidateInput,
+): Promise<HiringApplicationRow> {
+  const res = await api.post(`/api/hiring/demands/${demandId}/shortlist-candidate/`, payload)
+  return res.data as HiringApplicationRow
+}
+
+export async function sendShortlistedToClientReview(
+  demandId: number,
+  payload: BulkSendToClientReviewInput,
+): Promise<{ sent: number; skipped: number; errors: unknown[] }> {
+  const res = await api.post(`/api/hiring/demands/${demandId}/send-shortlisted-to-client-review/`, payload)
+  return res.data as { sent: number; skipped: number; errors: unknown[] }
+}
+
+// Offers
+
+export interface ListOffersParams {
+  status?: string
+  joining_date?: string
+  hiring_application?: number
+  page?: number
+}
+
+export async function listOffers(params?: ListOffersParams): Promise<{ items: OfferRow[]; count?: number }> {
+  const res = await api.get('/api/hiring/offers/', { params })
+  return unwrapDrfResults<OfferRow>(res.data)
+}
+
+export async function getOffer(id: number): Promise<OfferRow> {
+  const res = await api.get(`/api/hiring/offers/${id}/`)
+  return res.data as OfferRow
+}
+
+export async function createOffer(payload: OfferCreateInput): Promise<OfferRow> {
+  const res = await api.post('/api/hiring/offers/', payload)
+  return res.data as OfferRow
+}
+
+export async function updateOffer(id: number, payload: OfferUpdateInput): Promise<OfferRow> {
+  const res = await api.patch(`/api/hiring/offers/${id}/`, payload)
+  return res.data as OfferRow
+}
+
+export async function releaseOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
+  const res = await api.post(`/api/hiring/offers/${id}/release/`, payload)
+  return res.data as OfferRow
+}
+
+export async function acceptOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
+  const res = await api.post(`/api/hiring/offers/${id}/accept/`, payload)
+  return res.data as OfferRow
+}
+
+export async function declineOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
+  const res = await api.post(`/api/hiring/offers/${id}/decline/`, payload)
+  return res.data as OfferRow
+}
+
+export async function withdrawOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
+  const res = await api.post(`/api/hiring/offers/${id}/withdraw/`, payload)
+  return res.data as OfferRow
+}
+
+export async function expireOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
+  const res = await api.post(`/api/hiring/offers/${id}/expire/`, payload)
+  return res.data as OfferRow
+}
+
+// Client review
+
+export interface ListClientReviewParams {
+  client_decision?: string
+  site?: number
+  mrf?: number
+  mrf_line_item?: number
+  status?: string
+  job_role?: number
+  search?: string
+  only_pending?: boolean
+  page?: number
+}
+
+export async function listClientReviewApplications(
+  params?: ListClientReviewParams,
+): Promise<{ items: ClientReviewApplicationRow[]; count?: number }> {
+  const res = await api.get('/api/hiring/client-review/', {
+    params: {
+      ...params,
+      only_pending: typeof params?.only_pending === 'boolean' ? String(params.only_pending) : params?.only_pending,
+    },
+  })
+  return unwrapDrfResults<ClientReviewApplicationRow>(res.data)
 }

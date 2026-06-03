@@ -11,7 +11,7 @@ interface RecentActivityListProps {
 function resolveUrl(item: DashboardRecentActivityItem): string | undefined {
   if (item.url) return item.url
   if (item.type === 'mrf') return `/mrf/${item.id}`
-  if (item.type === 'onboarding') return `/client-onboarding/${item.id}`
+  if (item.type === 'onboarding') return `/mobilisation/${item.id}`
   return undefined
 }
 

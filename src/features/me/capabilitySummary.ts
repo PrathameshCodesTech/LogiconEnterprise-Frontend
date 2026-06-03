@@ -4,7 +4,7 @@ import { permissionAreaLabel } from '@/features/roles/displayLabels'
 const AREA_PREFIXES: { prefix: string; label: string }[] = [
   { prefix: 'workflow.config.', label: 'Approval setup' },
   { prefix: 'workflow.', label: 'Approvals' },
-  { prefix: 'client_onboarding.', label: 'Client onboarding' },
+  { prefix: 'client_onboarding.', label: 'Mobilisation' },
   { prefix: 'site_role_requirement.', label: 'Site role requirements' },
   { prefix: 'job_role.', label: 'Job roles' },
   { prefix: 'hiring_application.', label: 'Hiring' },

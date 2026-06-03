@@ -2,7 +2,7 @@
 
 export const REQUEST_TYPE_LABEL: Record<string, string> = {
   mrf: 'Manpower Request',
-  client_onboarding: 'Client Onboarding',
+  client_onboarding: 'Mobilisation',
 }
 
 export function requestTypeLabel(triggerType: string | undefined | null): string {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Search, UserPlus } from 'lucide-react'
+import { ExternalLink, Search, UserPlus } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAllCapabilities } from '@/lib/capabilities'
 import { listHiringDemands } from '@/api/hiring'
@@ -119,6 +120,13 @@ export function HiringDemandsPage() {
                   <TD className="py-2 text-xs font-medium">{d.open_count}</TD>
                   <TD className="py-2 text-right">
                     <div className="flex flex-wrap justify-end gap-2">
+                      <Link
+                        to={`/hiring/demands/${d.id}`}
+                        className="inline-flex items-center gap-1 min-h-8 rounded-panel border border-app-border bg-app-surface px-2 text-xs text-app-text shadow-panel hover:border-brand-500/40 transition-colors"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                        Details
+                      </Link>
                       {canFindFromPool ? (
                         <Button type="button" variant="secondary" className="min-h-8 gap-1 px-2 text-xs" onClick={() => openPool(d)}>
                           <Search className="h-3.5 w-3.5" aria-hidden />

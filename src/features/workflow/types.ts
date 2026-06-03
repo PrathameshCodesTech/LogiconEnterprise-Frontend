@@ -26,7 +26,7 @@ export interface WorkflowConfigCheck {
   ok: boolean
   /** Present for MRF workflow config checks. */
   mrf?: number | null
-  /** Present for client onboarding workflow config checks. */
+  /** Present for mobilisation workflow config checks; backend field name is compatibility-only. */
   client_onboarding_request?: number | null
   template: null | { id: number; name: string; code: string }
   mapping_level: null | 'org' | 'client' | 'site'
@@ -68,6 +68,8 @@ export interface WorkflowInstance {
   id: number
   mrf?: number | null
   client_onboarding_request?: number | null
+  mobilisation?: number | null
+  sales_proposal?: number | null
   org?: number
   template?: number
   status?: string
@@ -81,7 +83,7 @@ export interface WorkflowInstance {
 }
 
 /** Row from GET /api/workflow/my-tasks/ */
-export type WorkflowMyTaskTargetType = 'mrf' | 'client_onboarding'
+export type WorkflowMyTaskTargetType = 'mrf' | 'client_onboarding' | 'mobilisation' | 'sales_proposal'
 
 export interface WorkflowMyTask {
   workflow_id: number
@@ -168,7 +170,19 @@ export type WorkflowTaskTarget =
     }
   | {
       type: 'client_onboarding'
-      client_onboarding: WorkflowTaskClientOnboarding
+      client_onboarding: WorkflowTaskMobilisationSetup
+      line_items: []
+    }
+  | {
+      type: 'mobilisation'
+      mobilisation: WorkflowTaskMobilisation
+      line_items: []
+    }
+  | {
+      type: 'sales_proposal'
+      sales_proposal: WorkflowTaskSalesProposal
+      budget_lines: WorkflowTaskSalesProposalBudgetLine[]
+      breakup_lines: WorkflowTaskSalesProposalBreakupLine[]
       line_items: []
     }
 
@@ -235,70 +249,15 @@ export interface WorkflowTaskMRFLineItem {
   budget_plan_name: string | null
 }
 
-export interface WorkflowTaskOnboardingProposedSite {
-  id: number
-  name: string
-  code: string
-  address: string
-  city: string
-  state: string
-  pincode: string
-  contact_person: string
-  contact_phone: string
-  contact_email: string
-  location_area: number | null
-  location_area_name: string | null
-  is_active: boolean
-}
-
 export interface WorkflowTaskOnboardingProposedDepartment {
   id: number
   name: string
   code: string
   scope_level: string
   description: string
-  proposed_site: number | null
-  proposed_site_name: string | null
-  is_active: boolean
-}
-
-export interface WorkflowTaskOnboardingProposedRoleRequirement {
-  id: number
-  proposed_site: number
-  proposed_site_name: string | null
-  proposed_department: number | null
-  proposed_department_name: string | null
-  job_role: number
-  job_role_name: string | null
-  approved_headcount: number
-  billing_type: string
-  billing_rate: string | null
-  wage_min: string | null
-  wage_max: string | null
-  shift_hours: string | null
-  wage_category: number | null
-  wage_category_name: string | null
-  effective_from: string | null
-  effective_to: string | null
-  is_active: boolean
-}
-
-export interface WorkflowTaskOnboardingProposedBudget {
-  id: number
-  name: string
-  code: string
-  budget_nature: string
-  budget_type: string
-  scope_level: string
-  proposed_site: number | null
-  proposed_site_name: string | null
-  proposed_department: number | null
-  proposed_department_name: string | null
-  amount: string
-  currency: string
-  period_start: string
-  period_end: string | null
-  notes: string
+  real_site: number | null
+  real_site_name: string | null
+  real_site_code: string | null
   is_active: boolean
 }
 
@@ -312,8 +271,9 @@ export interface WorkflowTaskOnboardingProposedUser {
   access_role_code: string | null
   access_role_name: string | null
   scope_level: string
-  proposed_site: number | null
-  proposed_site_name: string | null
+  real_site: number | null
+  real_site_name: string | null
+  real_site_code: string | null
   is_primary_contact: boolean
   send_invite_on_finalization: boolean
   is_active: boolean
@@ -321,10 +281,11 @@ export interface WorkflowTaskOnboardingProposedUser {
   invite_status: string
 }
 
-export interface WorkflowTaskClientOnboarding {
+export interface WorkflowTaskMobilisationSetup {
   id: number
   status: string
-  onboarding_type: string
+  onboarding_type?: string
+  mobilisation_type?: string
   client: number | null
   client_name: string | null
   requested_by_username: string | null
@@ -343,11 +304,94 @@ export interface WorkflowTaskClientOnboarding {
   proposed_gst_number: string
   finalization_status: string
   created_client: number | null
-  proposed_sites: WorkflowTaskOnboardingProposedSite[]
+  source_sales_lead?: number | null
+  source_sales_lead_name?: string | null
+  source_proposal_version?: number | null
+  source_proposal_version_number?: number | null
+  source_proposal_grand_total?: string | null
+  source_proposal_manpower_total?: number | null
+  source_proposal_client_approval_status?: string | null
   proposed_departments: WorkflowTaskOnboardingProposedDepartment[]
-  proposed_role_requirements: WorkflowTaskOnboardingProposedRoleRequirement[]
-  proposed_budgets: WorkflowTaskOnboardingProposedBudget[]
   proposed_users: WorkflowTaskOnboardingProposedUser[]
+}
+
+export type WorkflowTaskMobilisation = WorkflowTaskMobilisationSetup
+
+export interface WorkflowTaskSalesProposalBudgetLine {
+  id: number
+  description?: string | null
+  service_category?: string | null
+  job_role_name?: string | null
+  site_name?: string | null
+  manpower_count?: number | null
+  unit_cost?: string | null
+  total_cost?: string | null
+  is_manual_override?: boolean
+  sort_order?: number
+  site_id?: number | null
+  job_role_id?: number | null
+}
+
+export interface WorkflowTaskSalesProposalBreakupLine {
+  id: number
+  component_code?: string | null
+  component_name?: string | null
+  component_type?: string | null
+  percentage?: string | null
+  sort_order?: number
+  amount?: string | null
+  site_id?: number | null
+  job_role_id?: number | null
+}
+
+export interface WorkflowTaskSalesProposalLead {
+  id: number
+  client_name?: string | null
+  client_contact_person?: string | null
+  client_email?: string | null
+  client_phone?: string | null
+  current_stage?: string | null
+}
+
+export interface WorkflowTaskSalesProposalUserRef {
+  id: number
+  username: string
+}
+
+export interface WorkflowTaskSalesProposalClientResponseSummary {
+  client_response?: string | null
+  client_remarks?: string | null
+  responded_at?: string | null
+  responded_by_name?: string | null
+  responded_by_email?: string | null
+}
+
+export interface WorkflowTaskSalesProposal {
+  id: number
+  lead?: WorkflowTaskSalesProposalLead | null
+  lead_type?: string | null
+  client_name?: string | null
+  sales_person?: WorkflowTaskSalesProposalUserRef | null
+  sales_person_name?: string | null
+  version_number?: number | null
+  status?: string | null
+  internal_approval_status?: string | null
+  client_approval_status?: string | null
+  client_remarks?: string | null
+  management_fee_percent?: string | null
+  gst_applicable?: boolean
+  sales_remarks?: string | null
+  submitted_internal_at?: string | null
+  internally_approved_at?: string | null
+  valid_from?: string | null
+  valid_to?: string | null
+  manpower_total?: number | null
+  grand_total?: string | null
+  budget_lines?: WorkflowTaskSalesProposalBudgetLine[]
+  breakup_lines?: WorkflowTaskSalesProposalBreakupLine[]
+  created_at?: string | null
+  created_by_username?: string | null
+  client_response_summary?: WorkflowTaskSalesProposalClientResponseSummary | null
 }
 
 export interface WorkflowTaskActions {

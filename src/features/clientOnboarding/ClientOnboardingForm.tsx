@@ -210,7 +210,7 @@ export function ClientOnboardingForm({
       }
     }
     if (!values.onboarding_type.trim()) {
-      setLocalError('Onboarding type is required.')
+      setLocalError('Mobilisation type is required.')
       return
     }
     const esc = values.expected_site_count.trim()
@@ -234,7 +234,7 @@ export function ClientOnboardingForm({
 
       <Select
         id="co_onboarding_type"
-        label="Onboarding type"
+        label="Mobilisation type"
         value={values.onboarding_type}
         onChange={(e) => {
           const next = e.target.value as ClientOnboardingType
@@ -280,7 +280,7 @@ export function ClientOnboardingForm({
       ) : (
         <div className="rounded-panel border border-app-border bg-app-muted p-3 text-sm text-app-secondary">
           <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Existing client</p>
-          <p className="mt-1">Not used for new client onboarding. Proposed client details are captured below.</p>
+          <p className="mt-1">Not applicable for new client mobilisation. Proposed client details are captured below.</p>
         </div>
       )}
 

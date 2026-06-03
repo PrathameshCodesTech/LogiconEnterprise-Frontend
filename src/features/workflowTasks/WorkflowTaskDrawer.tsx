@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { Link } from 'react-router-dom'
+import { ExternalLink } from 'lucide-react'
 import { actOnWorkflowStep, getMyWorkflowTaskDetail } from '@/api/workflow'
 import { parseApiError, parseWorkflowStepActionError } from '@/lib/apiError'
 import { WorkflowActionErrorBanner } from '@/features/workflowTasks/WorkflowActionErrorBanner'
@@ -13,12 +15,17 @@ import {
   isCommercialOverrideEnabled,
   resolveMasterCommercials,
 } from '@/features/mrf/mrfCommercialOverride'
+import { proposalStatusLabel, proposalStatusVariant } from '@/features/sales/salesUtils'
 import type {
   WorkflowAction,
   WorkflowMyTask,
   WorkflowTaskDetailResponse,
+  WorkflowTaskMobilisationSetup,
   WorkflowTaskMRF,
   WorkflowTaskMRFLineItem,
+  WorkflowTaskSalesProposal,
+  WorkflowTaskSalesProposalBudgetLine,
+  WorkflowTaskSalesProposalBreakupLine,
   WorkflowTaskTarget,
 } from '@/features/workflow/types'
 import { Badge } from '@/components/ui/Badge'
@@ -41,13 +48,9 @@ import {
   TaskTimelineStepper,
 } from '@/features/workflowTasks/TaskTimelineComponents'
 import {
-  BudgetsTabOnboarding,
-  UsersTabOnboarding,
-  ClientTabOnboarding,
-  DepartmentsTabOnboarding,
-  OnboardingOverviewTab,
-  RoleRequirementsTabOnboarding,
-  SitesTabOnboarding,
+  MobilisationDepartmentsTab,
+  MobilisationOverviewTab,
+  MobilisationUsersTab,
 } from '@/features/workflowTasks/workflowTaskOnboardingTabs'
 import { cn } from '@/lib/cn'
 
@@ -55,10 +58,57 @@ function isMrfTarget(t: WorkflowTaskTarget): t is Extract<WorkflowTaskTarget, { 
   return t.type === 'mrf'
 }
 
-function isOnboardingTarget(
+function isMobilisationLike(
   t: WorkflowTaskTarget,
-): t is Extract<WorkflowTaskTarget, { type: 'client_onboarding' }> {
-  return t.type === 'client_onboarding'
+): t is
+  | Extract<WorkflowTaskTarget, { type: 'mobilisation' }>
+  | Extract<WorkflowTaskTarget, { type: 'client_onboarding' }> {
+  return t.type === 'mobilisation' || t.type === 'client_onboarding'
+}
+
+function isProposalTarget(
+  t: WorkflowTaskTarget,
+): t is Extract<WorkflowTaskTarget, { type: 'sales_proposal' }> {
+  return t.type === 'sales_proposal'
+}
+
+function getMobilisationData(t: WorkflowTaskTarget): WorkflowTaskMobilisationSetup | null {
+  if (t.type === 'mobilisation') return t.mobilisation
+  if (t.type === 'client_onboarding') return t.client_onboarding
+  return null
+}
+
+function targetDetailUrl(t: WorkflowTaskTarget): string | null {
+  if (t.type === 'mrf') return `/mrf/${t.mrf.id}`
+  if (t.type === 'mobilisation') return `/mobilisation/${t.mobilisation.id}`
+  if (t.type === 'client_onboarding') return `/mobilisation/${t.client_onboarding.id}`
+  if (t.type === 'sales_proposal') return `/sales/proposals/${t.sales_proposal.id}`
+  return null
+}
+
+function salesProposalDrawerView(
+  target: Extract<WorkflowTaskTarget, { type: 'sales_proposal' }>,
+): WorkflowTaskSalesProposal {
+  const proposal = target.sales_proposal
+  const clientResponse = proposal.client_response_summary?.client_response ?? proposal.client_approval_status
+  const clientRemarks = proposal.client_response_summary?.client_remarks || ''
+  return {
+    ...proposal,
+    client_name: proposal.lead?.client_name ?? null,
+    lead_type: proposal.lead?.current_stage ?? null,
+    sales_person_name: proposal.sales_person?.username ?? null,
+    client_approval_status: clientResponse,
+    client_remarks: clientRemarks || proposal.sales_remarks || null,
+    valid_from: proposal.submitted_internal_at ?? null,
+    valid_to: proposal.internally_approved_at ?? null,
+    budget_lines: target.budget_lines.map((line) => ({
+      ...line,
+      job_role_name: line.description ?? null,
+      site_name: line.service_category ?? null,
+      is_manual_override: false,
+    })),
+    breakup_lines: target.breakup_lines,
+  }
 }
 
 function humanizeMrfType(code: string): string {
@@ -102,17 +152,9 @@ function mrfStatusLabel(status: string): string {
 }
 
 type MrfTabId = 'overview' | 'request' | 'line-items' | 'timeline' | 'action'
-type OnboardingTabId =
-  | 'overview'
-  | 'client'
-  | 'sites'
-  | 'departments'
-  | 'roles'
-  | 'budgets'
-  | 'users'
-  | 'timeline'
-  | 'action'
-type TabId = MrfTabId | OnboardingTabId
+type MobilisationTabId = 'overview' | 'departments' | 'users' | 'timeline' | 'action'
+type ProposalTabId = 'overview' | 'budget-lines' | 'breakup' | 'timeline' | 'action'
+type TabId = MrfTabId | MobilisationTabId | ProposalTabId
 
 const MRF_TABS: { id: MrfTabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -122,14 +164,18 @@ const MRF_TABS: { id: MrfTabId; label: string }[] = [
   { id: 'action', label: 'Action' },
 ]
 
-const ONBOARDING_TABS: { id: OnboardingTabId; label: string }[] = [
+const MOBILISATION_TABS: { id: MobilisationTabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'client', label: 'Client' },
-  { id: 'sites', label: 'Sites' },
   { id: 'departments', label: 'Departments' },
-  { id: 'roles', label: 'Role requirements' },
-  { id: 'budgets', label: 'Budgets' },
   { id: 'users', label: 'Users' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'action', label: 'Action' },
+]
+
+const PROPOSAL_TABS: { id: ProposalTabId; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'budget-lines', label: 'Budget lines' },
+  { id: 'breakup', label: 'Salary breakup' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'action', label: 'Action' },
 ]
@@ -196,12 +242,14 @@ function MrfOverviewTab({
   task,
   mrf,
   lineItems,
+  detailUrl,
   onGoToLineItems,
   onGoToAction,
 }: {
   task: WorkflowMyTask
   mrf: WorkflowTaskMRF
   lineItems: WorkflowTaskMRFLineItem[]
+  detailUrl: string | null
   onGoToLineItems: () => void
   onGoToAction: () => void
 }) {
@@ -241,6 +289,8 @@ function MrfOverviewTab({
           </>
         }
       />
+
+      {detailUrl ? <TargetDetailLink url={detailUrl} /> : null}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <TaskMetricTile
@@ -524,6 +574,276 @@ function LineItemsTab({
   )
 }
 
+// ─── Target detail link ───────────────────────────────────────────────────────
+
+function TargetDetailLink({ url }: { url: string }) {
+  return (
+    <Link
+      to={url}
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+    >
+      <ExternalLink className="h-3.5 w-3.5" />
+      View full details
+    </Link>
+  )
+}
+
+// ─── Sales proposal helpers ───────────────────────────────────────────────────
+
+function clientApprovalStatusLabel(s: string | null | undefined): string {
+  if (!s) return '—'
+  const map: Record<string, string> = {
+    pending: 'Pending',
+    approved: 'Approved',
+    rejected: 'Rejected',
+  }
+  return map[s] ?? s.replace(/_/g, ' ')
+}
+
+type BadgeVariant2 = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention'
+
+function clientApprovalStatusVariant(s: string | null | undefined): BadgeVariant2 {
+  if (s === 'approved') return 'success'
+  if (s === 'rejected') return 'danger'
+  if (s === 'pending') return 'attention'
+  return 'neutral'
+}
+
+// ─── Sales proposal overview tab ─────────────────────────────────────────────
+
+function ProposalOverviewTab({
+  task,
+  proposal,
+  budgetLines,
+  breakupLines,
+  detailUrl,
+  onGoToBudgetLines,
+  onGoToAction,
+}: {
+  task: WorkflowMyTask
+  proposal: WorkflowTaskSalesProposal
+  budgetLines: WorkflowTaskSalesProposalBudgetLine[]
+  breakupLines: WorkflowTaskSalesProposalBreakupLine[]
+  detailUrl: string | null
+  onGoToBudgetLines: () => void
+  onGoToAction: () => void
+}) {
+  const statusLabel = proposal.status ? proposalStatusLabel(proposal.status) : '—'
+  const statusVariant = proposalStatusVariant(proposal.status ?? '')
+  const budgetCount = budgetLines.length
+  const breakupCount = breakupLines.length
+  const clientName = proposal.lead?.client_name?.trim() || null
+  const leadStage = proposal.lead?.current_stage?.replace(/_/g, ' ') || null
+  const leadTypeFull = proposal.lead_type?.replace(/_/g, ' ') || leadStage
+
+  return (
+    <div className="space-y-3">
+      <TaskSummaryBand
+        title={`Proposal #${proposal.id}${proposal.version_number != null ? ` v${proposal.version_number}` : ''}`}
+        subtitle={clientName}
+        badges={
+          <>
+            <Badge variant="info">{task.step_name}</Badge>
+            {leadStage ? <Badge variant="neutral" className="capitalize">{leadStage}</Badge> : null}
+            <Badge variant={statusVariant}>{statusLabel}</Badge>
+          </>
+        }
+      />
+
+      {detailUrl ? <TargetDetailLink url={detailUrl} /> : null}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <TaskMetricTile
+          label="Grand total"
+          value={proposal.grand_total ? formatMoney(proposal.grand_total) : '—'}
+          compact
+        />
+        <TaskMetricTile
+          label="Manpower count"
+          value={proposal.manpower_total != null ? proposal.manpower_total : '—'}
+        />
+        <TaskMetricTile label="Budget lines" value={budgetCount} />
+        <TaskMetricTile label="Breakup lines" value={breakupCount} />
+      </div>
+
+      <TaskApprovalCard
+        stepName={task.step_name}
+        departmentName={task.assigned_department_name}
+        activatedAt={task.activated_at}
+        dueAt={task.due_at}
+      />
+
+      <TaskInfoGrid
+        title="Proposal details"
+        rows={[
+          { label: 'Client', value: proposal.client_name?.trim() || '—' },
+          { label: 'Lead type', value: leadTypeFull ?? '—' },
+          { label: 'Sales person', value: proposal.sales_person_name?.trim() || '—' },
+          { label: 'Version', value: proposal.version_number != null ? `v${proposal.version_number}` : '—' },
+          { label: 'Valid from', value: proposal.valid_from ?? '—' },
+          { label: 'Valid to', value: proposal.valid_to ?? '—' },
+          {
+            label: 'Status',
+            value: <Badge variant={statusVariant}>{statusLabel}</Badge>,
+          },
+          {
+            label: 'Client response',
+            value: (
+              <Badge variant={clientApprovalStatusVariant(proposal.client_approval_status)}>
+                {clientApprovalStatusLabel(proposal.client_approval_status)}
+              </Badge>
+            ),
+          },
+        ]}
+      />
+
+      {/* Client remarks */}
+      {proposal.client_remarks?.trim() ? (
+        <TaskSectionCard title="Client remarks">
+          <p className="whitespace-pre-wrap text-sm text-app-secondary">{proposal.client_remarks}</p>
+        </TaskSectionCard>
+      ) : null}
+
+      {/* Budget lines preview */}
+      <div className="rounded-panel border border-app-border bg-app-surface px-4 py-3">
+        <div className="mb-2.5 flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">
+            Budget lines
+          </p>
+          {budgetCount > 0 ? (
+            <button
+              type="button"
+              onClick={onGoToBudgetLines}
+              className="text-xs font-medium text-brand-600 hover:text-brand-700"
+            >
+              {budgetCount > 3 ? `View all ${budgetCount} →` : 'View budget lines →'}
+            </button>
+          ) : null}
+        </div>
+        {budgetCount === 0 ? (
+          <p className="text-xs text-app-secondary">No budget lines.</p>
+        ) : (
+          <div className="space-y-1">
+            {(proposal.budget_lines ?? []).slice(0, 3).map((bl) => (
+              <div
+                key={bl.id}
+                className="flex items-center justify-between gap-3 rounded-panel bg-app-muted/50 px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-app-text">
+                    {bl.job_role_name ?? '—'}
+                  </p>
+                  <p className="text-xs text-app-secondary">
+                    {bl.site_name ?? '—'}
+                    {bl.manpower_count != null ? ` · HC ${bl.manpower_count}` : ''}
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold tabular-nums text-app-text">
+                  {bl.total_cost ? formatMoney(bl.total_cost) : '—'}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <ActionNudge onGoToAction={onGoToAction} />
+    </div>
+  )
+}
+
+// ─── Sales proposal budget lines tab ─────────────────────────────────────────
+
+function BudgetLinesTabProposal({ proposal }: { proposal: WorkflowTaskSalesProposal }) {
+  const lines: WorkflowTaskSalesProposalBudgetLine[] = proposal.budget_lines ?? []
+  if (lines.length === 0) {
+    return <p className="text-sm text-app-secondary">No budget lines.</p>
+  }
+  return (
+    <div className="overflow-x-auto rounded-panel border border-app-border">
+      <Table>
+        <THead>
+          <TR>
+            <TH className="py-2">Job role</TH>
+            <TH className="py-2">Site</TH>
+            <TH className="py-2">Headcount</TH>
+            <TH className="py-2">Unit cost</TH>
+            <TH className="py-2">Total</TH>
+            <TH className="py-2">Override</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {lines.map((bl) => (
+            <TR key={bl.id}>
+              <TD className="py-2 text-sm">{bl.job_role_name ?? '—'}</TD>
+              <TD className="py-2 text-xs text-app-secondary">{bl.site_name ?? '—'}</TD>
+              <TD className="py-2 text-sm">{bl.manpower_count ?? '—'}</TD>
+              <TD className="py-2 text-xs tabular-nums text-app-secondary">
+                {bl.unit_cost ? formatMoney(bl.unit_cost) : '—'}
+              </TD>
+              <TD className="py-2 text-sm font-semibold tabular-nums">
+                {bl.total_cost ? formatMoney(bl.total_cost) : '—'}
+              </TD>
+              <TD className="py-2">
+                {bl.is_manual_override ? (
+                  <Badge variant="warning">Override</Badge>
+                ) : (
+                  <span className="text-xs text-app-subtle">—</span>
+                )}
+              </TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </div>
+  )
+}
+
+// ─── Sales proposal breakup tab ───────────────────────────────────────────────
+
+function BreakupTabProposal({ proposal }: { proposal: WorkflowTaskSalesProposal }) {
+  const lines: WorkflowTaskSalesProposalBreakupLine[] = (proposal.breakup_lines ?? []).slice().sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+  )
+  if (lines.length === 0) {
+    return <p className="text-sm text-app-secondary">No breakup lines.</p>
+  }
+  return (
+    <div className="overflow-x-auto rounded-panel border border-app-border">
+      <Table>
+        <THead>
+          <TR>
+            <TH className="py-2">Code</TH>
+            <TH className="py-2">Component</TH>
+            <TH className="py-2">Type</TH>
+            <TH className="py-2">Percentage</TH>
+            <TH className="py-2">Amount</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {lines.map((bl) => (
+            <TR key={bl.id}>
+              <TD className="py-2">
+                <span className="font-mono text-xs text-app-text">{bl.component_code ?? '—'}</span>
+              </TD>
+              <TD className="py-2 text-sm">{bl.component_name ?? '—'}</TD>
+              <TD className="py-2 text-xs capitalize text-app-secondary">
+                {bl.component_type?.replace(/_/g, ' ') ?? '—'}
+              </TD>
+              <TD className="py-2 text-xs tabular-nums text-app-secondary">
+                {bl.percentage ? `${bl.percentage}%` : '—'}
+              </TD>
+              <TD className="py-2 text-sm font-semibold tabular-nums">
+                {bl.amount ? formatMoney(bl.amount) : '—'}
+              </TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </div>
+  )
+}
+
 // ─── Timeline tab ─────────────────────────────────────────────────────────────
 
 function TimelineTab({
@@ -742,7 +1062,8 @@ export function WorkflowTaskDrawer({
       try {
         const data = await getMyWorkflowTaskDetail(stepId)
         if (cancelled) return
-        if (data.target.type !== 'mrf' && data.target.type !== 'client_onboarding') {
+        const supportedTypes = ['mrf', 'client_onboarding', 'mobilisation', 'sales_proposal']
+        if (!supportedTypes.includes(data.target.type)) {
           setLoadError('This task uses an unsupported request type.')
           return
         }
@@ -764,9 +1085,12 @@ export function WorkflowTaskDrawer({
     }
   }, [open, stepId, resetLocal])
 
-  const isMrf = detail ? isMrfTarget(detail.target) : false
-
-  const visibleTabs = useMemo(() => (isMrf ? MRF_TABS : ONBOARDING_TABS), [isMrf])
+  const visibleTabs = useMemo(() => {
+    if (!detail) return MRF_TABS
+    if (isMrfTarget(detail.target)) return MRF_TABS
+    if (isProposalTarget(detail.target)) return PROPOSAL_TABS
+    return MOBILISATION_TABS
+  }, [detail])
 
   useEffect(() => {
     if (!detail) return
@@ -824,64 +1148,96 @@ export function WorkflowTaskDrawer({
 
           {/* Tab content */}
           <div className="min-h-0 flex-1">
-            {tab === 'overview' ?
-              isMrfTarget(detail.target) ? (
-                <MrfOverviewTab
-                  task={detail.task}
-                  mrf={detail.target.mrf}
-                  lineItems={detail.target.line_items}
-                  onGoToLineItems={() => setTab('line-items')}
-                  onGoToAction={() => setTab('action')}
-                />
-              ) : (
-                <OnboardingOverviewTab
-                  task={detail.task}
-                  ob={detail.target.client_onboarding}
-                  onGoToAction={() => setTab('action')}
-                />
-              )
-            : null}
-            {tab === 'request' && isMrfTarget(detail.target) ? (
-              <RequestTabMrf mrf={detail.target.mrf} />
-            ) : null}
-            {tab === 'client' && isOnboardingTarget(detail.target) ? (
-              <ClientTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'sites' && isOnboardingTarget(detail.target) ? (
-              <SitesTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'departments' && isOnboardingTarget(detail.target) ? (
-              <DepartmentsTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'roles' && isOnboardingTarget(detail.target) ? (
-              <RoleRequirementsTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'budgets' && isOnboardingTarget(detail.target) ? (
-              <BudgetsTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'users' && isOnboardingTarget(detail.target) ? (
-              <UsersTabOnboarding ob={detail.target.client_onboarding} />
-            ) : null}
-            {tab === 'line-items' && isMrfTarget(detail.target) ? (
-              <LineItemsTab
-                items={detail.target.line_items}
-                billingType={detail.target.mrf.billing_type}
-              />
-            ) : null}
-            {tab === 'timeline' ? (
-              <TimelineTab
-                steps={detail.workflow.steps}
-                audit={detail.workflow.audit_trail}
-                currentStepId={detail.workflow.current_step_id}
-              />
-            ) : null}
-            {tab === 'action' ? (
-              <TaskActionForm
-                key={`${detail.task.step_id}-${detail.workflow.id}`}
-                detail={detail}
-                onSuccess={handleActionSuccess}
-              />
-            ) : null}
+            {(() => {
+              const url = targetDetailUrl(detail.target)
+              const mobData = getMobilisationData(detail.target)
+
+              if (tab === 'overview') {
+                if (isMrfTarget(detail.target)) {
+                  return (
+                    <MrfOverviewTab
+                      task={detail.task}
+                      mrf={detail.target.mrf}
+                      lineItems={detail.target.line_items}
+                      detailUrl={url}
+                      onGoToLineItems={() => setTab('line-items')}
+                      onGoToAction={() => setTab('action')}
+                    />
+                  )
+                }
+                if (isMobilisationLike(detail.target) && mobData) {
+                  return (
+                    <MobilisationOverviewTab
+                      task={detail.task}
+                      setup={mobData}
+                      detailUrl={url}
+                      onGoToAction={() => setTab('action')}
+                    />
+                  )
+                }
+                if (isProposalTarget(detail.target)) {
+                  const proposal = salesProposalDrawerView(detail.target)
+                  return (
+                    <ProposalOverviewTab
+                      task={detail.task}
+                      proposal={proposal}
+                      budgetLines={proposal.budget_lines ?? []}
+                      breakupLines={proposal.breakup_lines ?? []}
+                      detailUrl={url}
+                      onGoToBudgetLines={() => setTab('budget-lines')}
+                      onGoToAction={() => setTab('action')}
+                    />
+                  )
+                }
+                return null
+              }
+
+              if (tab === 'request' && isMrfTarget(detail.target)) {
+                return <RequestTabMrf mrf={detail.target.mrf} />
+              }
+
+              if (isMobilisationLike(detail.target) && mobData) {
+                if (tab === 'departments') return <MobilisationDepartmentsTab setup={mobData} />
+                if (tab === 'users') return <MobilisationUsersTab setup={mobData} />
+              }
+
+              if (tab === 'line-items' && isMrfTarget(detail.target)) {
+                return (
+                  <LineItemsTab
+                    items={detail.target.line_items}
+                    billingType={detail.target.mrf.billing_type}
+                  />
+                )
+              }
+
+              if (isProposalTarget(detail.target)) {
+                const proposal = salesProposalDrawerView(detail.target)
+                if (tab === 'budget-lines') return <BudgetLinesTabProposal proposal={proposal} />
+                if (tab === 'breakup') return <BreakupTabProposal proposal={proposal} />
+              }
+
+              if (tab === 'timeline') {
+                return (
+                  <TimelineTab
+                    steps={detail.workflow.steps}
+                    audit={detail.workflow.audit_trail}
+                    currentStepId={detail.workflow.current_step_id}
+                  />
+                )
+              }
+
+              if (tab === 'action') {
+                return (
+                  <TaskActionForm
+                    key={`${detail.task.step_id}-${detail.workflow.id}`}
+                    detail={detail}
+                    onSuccess={handleActionSuccess}
+                  />
+                )
+              }
+
+              return null
+            })()}
           </div>
         </div>
       ) : null}

@@ -1,6 +1,6 @@
 /**
  * Shared building blocks for workflow task drawer overview tabs.
- * Used by MRF and client-onboarding overview tabs.
+ * Used by MRF, mobilisation, and sales proposal overview tabs.
  */
 
 import type { ReactNode } from 'react'

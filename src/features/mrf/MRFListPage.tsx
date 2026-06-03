@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { deleteMRF, listMRFs, updateMRF } from '@/api/mrf'
+import { deleteMRF, listMRFs } from '@/api/mrf'
 import { departmentToFormOption, listDepartments, type DepartmentOption, type DepartmentRow } from '@/api/departments'
 import { listClients, type ClientRow } from '@/api/clients'
 import { listSites, type SiteProfileRow } from '@/api/sites'
@@ -10,13 +10,12 @@ import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Drawer } from '@/components/ui/Drawer'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
-import { MRFForm, mrfFormValuesToWritePayload, type MRFFormValues, type SiteOption } from '@/features/mrf/MRFForm'
+import type { SiteOption } from '@/features/mrf/MRFForm'
 import { MRFCreateWorkspaceDrawer } from '@/features/mrf/MRFCreateWorkspaceDrawer'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
 import type { MRFRow, RequestedByType, MRFType, BillingType } from '@/features/mrf/types'
@@ -96,12 +95,10 @@ export function MRFListPage() {
   const clientById = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
-
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [editing, setEditing] = useState<MRFRow | null>(null)
-  const [formSubmitting, setFormSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const formId = 'mrf-form-edit'
+  const [workspaceInitialMRF, setWorkspaceInitialMRF] = useState<MRFRow | null>(null)
+  const [deleteCandidateId, setDeleteCandidateId] = useState<number | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   function updateParam(next: Record<string, string | null>) {
     const p = new URLSearchParams(params)
@@ -203,47 +200,32 @@ export function MRFListPage() {
   }, [rows, client, siteById])
 
   function openCreate() {
+    setWorkspaceInitialMRF(null)
     setWorkspaceOpen(true)
   }
 
   function openEdit(r: MRFRow) {
-    setEditing(r)
-    setFormError(null)
-    setDrawerOpen(true)
-  }
-
-  function closeDrawer() {
-    setDrawerOpen(false)
-    setEditing(null)
-    setFormSubmitting(false)
-    setFormError(null)
-  }
-
-  async function submit(values: MRFFormValues) {
-    setFormSubmitting(true)
-    setFormError(null)
-    try {
-      if (editing) {
-        await updateMRF(editing.id, mrfFormValuesToWritePayload(values, 'edit'))
-      }
-      closeDrawer()
-      await refresh()
-    } catch (e: unknown) {
-      setFormError(parseApiError(e, 'Save failed').message)
-    } finally {
-      setFormSubmitting(false)
-    }
+    setWorkspaceInitialMRF(r)
+    setWorkspaceOpen(true)
   }
 
   async function handleDelete(r: MRFRow) {
     if (!canDelete) return
-    const ok = window.confirm('Delete this MRF? This cannot be undone.')
-    if (!ok) return
+    if (deleteCandidateId !== r.id) {
+      setDeleteCandidateId(r.id)
+      setDeleteError(null)
+      return
+    }
+    setDeleteBusyId(r.id)
+    setDeleteError(null)
     try {
       await deleteMRF(r.id)
+      setDeleteCandidateId(null)
       await refresh()
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Delete failed').message)
+      setDeleteError(parseApiError(e, 'Delete failed').message)
+    } finally {
+      setDeleteBusyId(null)
     }
   }
 
@@ -314,6 +296,7 @@ export function MRFListPage() {
       </div>
 
       {lookupError ? <ErrorState message={`Lookup API failed. Create/Edit is disabled. ${lookupError}`} /> : null}
+      {deleteError ? <ErrorState message={deleteError} /> : null}
 
       <div className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -495,8 +478,13 @@ export function MRFListPage() {
                             </Button>
                           ) : null}
                           {canDelete ? (
-                            <Button variant="danger" className="min-h-9 px-3" onClick={() => void handleDelete(r)}>
-                              Delete
+                            <Button
+                              variant="danger"
+                              className="min-h-9 px-3"
+                              onClick={() => void handleDelete(r)}
+                              disabled={deleteBusyId === r.id}
+                            >
+                              {deleteBusyId === r.id ? 'Deleting...' : deleteCandidateId === r.id ? 'Confirm delete' : 'Delete'}
                             </Button>
                           ) : null}
                         </div>
@@ -534,7 +522,12 @@ export function MRFListPage() {
       {workspaceOpen ? (
         <MRFCreateWorkspaceDrawer
           open={workspaceOpen}
-          onClose={() => setWorkspaceOpen(false)}
+          initialMRF={workspaceInitialMRF}
+          onClose={() => {
+            setWorkspaceOpen(false)
+            setWorkspaceInitialMRF(null)
+            void refresh()
+          }}
           onFinished={() => {
             void refresh()
           }}
@@ -546,42 +539,7 @@ export function MRFListPage() {
           canReadBudget={canReadBudget}
         />
       ) : null}
-
-      <Drawer
-        open={drawerOpen}
-        title="Edit MRF"
-        description="Update MRF details."
-        onClose={closeDrawer}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="secondary" onClick={closeDrawer} disabled={formSubmitting}>
-              Cancel
-            </Button>
-            <Button type="submit" form={formId} disabled={formSubmitting || !!lookupError}>
-              {formSubmitting ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        }
-      >
-        <MRFForm
-          key={`edit-${editing?.id ?? 'none'}`}
-          formId={formId}
-          mode="edit"
-          initialMRF={editing}
-          siteOptions={siteOptions}
-          departmentOptions={departmentOptions}
-          departmentsLoading={departmentsLoading}
-          departmentLookupError={departmentsError}
-          lookupError={lookupError}
-          canReadBudget={canReadBudget}
-          submitting={formSubmitting}
-          errorMessage={formError}
-          onSubmit={submit}
-        />
-      </Drawer>
     </div>
   )
 }
-
-
 

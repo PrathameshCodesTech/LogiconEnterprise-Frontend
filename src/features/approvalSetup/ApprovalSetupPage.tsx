@@ -36,7 +36,7 @@ export function ApprovalSetupPage() {
       <div>
         <h2 className="text-lg font-semibold text-app-text">Approval setup</h2>
         <p className="text-sm text-app-secondary">
-          Configure how manpower and client onboarding requests are reviewed before they move forward.
+          Configure how manpower and mobilisation requests are reviewed before they move forward.
         </p>
         {hint ? <p className="mt-2 text-xs text-app-subtle">{hint}</p> : null}
       </div>

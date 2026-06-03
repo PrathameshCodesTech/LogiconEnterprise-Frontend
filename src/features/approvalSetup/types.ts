@@ -1,6 +1,6 @@
 /** Types for workflow config admin APIs (`/api/workflow/config/...`). Field names follow DRF serializers. */
 
-export type RequestType = 'mrf' | 'client_onboarding' | string
+export type RequestType = 'mrf' | 'client_onboarding' | 'mobilisation' | 'sales_proposal' | string
 
 export type AssignmentMode = 'named_user' | 'queue' | 'claim' | string
 

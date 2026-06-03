@@ -1,0 +1,1522 @@
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  FileText,
+  IndianRupee,
+  Lock,
+  Send,
+  Users,
+} from 'lucide-react'
+import {
+  cloneProposalRevision,
+  convertProposalToMobilisation,
+  getProposalVersion,
+  getSalesLead,
+  listProposalBudgetLines,
+  listProposalBreakupLines,
+  listProposalVersions,
+  sendProposalToClient,
+  submitProposalInternalApproval,
+  updateProposalBudgetLine,
+  updateProposalBreakupLine,
+} from '@/api/sales'
+import { listUsers, type UserRow } from '@/api/users'
+import { listAvailableApprovalRoutes } from '@/api/workflow'
+import { ROUTES } from '@/app/routes'
+import { useAuthStore } from '@/features/auth/authStore'
+import {
+  formatDateTime,
+  formatShortDate,
+  LEAD_TYPE_LABELS,
+  leadTypeVariant,
+  proposalStatusLabel,
+  proposalStatusVariant,
+} from '@/features/sales/salesUtils'
+import { CAP, hasAnyCapability } from '@/lib/capabilities'
+import { parseApiError } from '@/lib/apiError'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Drawer } from '@/components/ui/Drawer'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
+import { Spinner } from '@/components/ui/Spinner'
+import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
+import type { ApprovalRoutePreview } from '@/features/workflow/types'
+import type {
+  ProposalBudgetLine,
+  ProposalBreakupLine,
+  ProposalVersion,
+  SalesLead,
+} from '@/types/sales'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+type TabId = 'overview' | 'budget-lines' | 'salary-breakup' | 'approval' | 'client-response' | 'revision-history'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'budget-lines', label: 'Budget Lines' },
+  { id: 'salary-breakup', label: 'Salary Breakup' },
+  { id: 'approval', label: 'Approval' },
+  { id: 'client-response', label: 'Client Response' },
+  { id: 'revision-history', label: 'Revision History' },
+]
+
+const LOCKED_STATUSES = new Set([
+  'submitted_internal',
+  'pending_internal_approval',
+  'internally_approved',
+  'sent_to_client',
+  'client_approved',
+  'client_rejected',
+  'client_revision_required',
+  'revision_requested',
+  'client_negotiation',
+  'locked',
+])
+
+const CELL =
+  'w-full border-0 bg-transparent px-1 py-0.5 text-sm text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500/40 rounded disabled:opacity-40'
+
+// ─── Indian number formatting ──────────────────────────────────────────────────
+
+/**
+ * Formats a number with Indian comma grouping (₹1,00,00,000 pattern)
+ * and optional decimal places.
+ */
+function formatIndianNumber(value: string | number | null | undefined): string {
+  if (value == null || value === '') return '—'
+  const num = typeof value === 'string' ? parseFloat(value.replace(/,/g, '')) : value
+  if (isNaN(num)) return '—'
+  const parts = num.toFixed(2).split('.')
+  const intPart = parts[0] ?? '0'
+  const decPart = parts[1] ?? '00'
+  const lastThree = intPart.slice(-3)
+  const rest = intPart.slice(0, -3)
+  const formatted = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + (rest ? ',' : '') + lastThree
+  return decPart === '00' ? formatted : `${formatted}.${decPart}`
+}
+
+function formatIndianCurrency(value: string | number | null | undefined): string {
+  const formatted = formatIndianNumber(value)
+  return formatted === '—' ? '—' : `₹${formatted}`
+}
+
+type RowSaveState = { saving: boolean; error: string | null }
+
+function rowStatus(saveStates: Record<string, RowSaveState>, key: string) {
+  const st = saveStates[key]
+  if (!st) return null
+  if (st.saving) return <span className="text-xs text-app-subtle italic">Saving…</span>
+  if (st.error) return (
+    <span className="text-xs text-status-danger" title={st.error}>Error</span>
+  )
+  return null
+}
+
+// ─── Send-to-client drawer ────────────────────────────────────────────────────
+
+function SendToClientDrawer({
+  open,
+  onClose,
+  onSent,
+  proposalId,
+  lead,
+}: {
+  open: boolean
+  onClose: () => void
+  onSent: (updated: ProposalVersion) => void
+  proposalId: number
+  lead: SalesLead | null
+}) {
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [days, setDays] = useState('')
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setEmail(lead?.client_email ?? '')
+    setName(lead?.client_contact_person ?? '')
+    setDays('')
+    setNote('')
+    setError(null)
+  }, [open, lead?.client_email, lead?.client_contact_person])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email.trim()) { setError('Recipient email is required.'); return }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const updated = await sendProposalToClient(proposalId, {
+        recipient_email: email.trim(),
+        recipient_name: name.trim() || undefined,
+        expires_days: days ? Number(days) : undefined,
+        note: note.trim() || undefined,
+      })
+      onSent(updated)
+    } catch (err: unknown) {
+      setError(parseApiError(err, 'Failed to send proposal').message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Drawer
+      open={open}
+      title="Send proposal to client"
+      description="The client will receive a link to review and respond to the proposal."
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button form="send-to-client-form" type="submit" disabled={submitting}>
+            {submitting ? 'Sending…' : 'Send'}
+          </Button>
+        </div>
+      }
+    >
+      <form id="send-to-client-form" onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+        {error ? <p className="text-sm text-status-danger">{error}</p> : null}
+        <Input
+          id="stc-email"
+          label="Recipient email *"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <p className="-mt-3 text-xs text-app-subtle">
+          Defaults from the sales lead. You can change it before sending.
+        </p>
+        <Input
+          id="stc-name"
+          label="Recipient name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Input
+          id="stc-days"
+          label="Link expires in (days)"
+          type="number"
+          min={1}
+          value={days}
+          onChange={(e) => setDays(e.target.value)}
+          placeholder="e.g. 30"
+        />
+        <Input
+          id="stc-note"
+          label="Note to client"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </form>
+    </Drawer>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export function SalesProposalWorkspacePage() {
+  const { id } = useParams<{ id: string }>()
+  const proposalId = Number(id)
+  const navigate = useNavigate()
+  const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
+  const canUpdate = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_UPDATE])
+  const canSendToClient = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_SEND_TO_CLIENT])
+  const canApproveProposal = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_APPROVE])
+
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const [proposal, setProposal] = useState<ProposalVersion | null>(null)
+  const [budgetLines, setBudgetLines] = useState<ProposalBudgetLine[]>([])
+  const [breakupLines, setBreakupLines] = useState<ProposalBreakupLine[]>([])
+  const [lead, setLead] = useState<SalesLead | null>(null)
+  const [approvalRoutes, setApprovalRoutes] = useState<ApprovalRoutePreview[]>([])
+  const [allVersions, setAllVersions] = useState<ProposalVersion[]>([])
+
+  const [tab, setTab] = useState<TabId>('overview')
+  const [saveStates, setSaveStates] = useState<Record<string, RowSaveState>>({})
+
+  // Approval tab state
+  const [selectedRoute, setSelectedRoute] = useState('')
+  const [approvalBusy, setApprovalBusy] = useState(false)
+  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [approvalSuccess, setApprovalSuccess] = useState(false)
+
+  // Send to client
+  const [sendDrawerOpen, setSendDrawerOpen] = useState(false)
+
+  // Clone state
+  const [cloneBusy, setCloneBusy] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
+
+  // Convert to mobilisation state
+  const [convertBusy, setConvertBusy] = useState(false)
+  const [convertError, setConvertError] = useState<string | null>(null)
+  const [convertDrawerOpen, setConvertDrawerOpen] = useState(false)
+  const [operationsOwner, setOperationsOwner] = useState('')
+  const [opsUsers, setOpsUsers] = useState<UserRow[]>([])
+  const [opsUsersLoading, setOpsUsersLoading] = useState(false)
+  const [opsUsersError, setOpsUsersError] = useState<string | null>(null)
+  const [convertValidationError, setConvertValidationError] = useState<string | null>(null)
+
+  const isLocked = proposal ? LOCKED_STATUSES.has(proposal.status) : true
+  const canEdit = canUpdate && !isLocked
+
+  async function load() {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const [propResult, budgetResult, breakupResult] = await Promise.all([
+        getProposalVersion(proposalId),
+        listProposalBudgetLines({ proposal_version: proposalId }),
+        listProposalBreakupLines({ proposal_version: proposalId }),
+      ])
+      setProposal(propResult)
+      setBudgetLines(budgetResult.items)
+      setBreakupLines(breakupResult.items)
+      setSaveStates({})
+
+      const leadId = propResult.lead
+      const [leadResult, versionsResult] = await Promise.all([
+        getSalesLead(leadId),
+        listProposalVersions({ lead: leadId }),
+      ])
+      setLead(leadResult)
+      setAllVersions(versionsResult.items.sort((a, b) => b.version_number - a.version_number))
+
+      try {
+        const routesResult = await listAvailableApprovalRoutes({ trigger_type: 'sales_proposal' })
+        setApprovalRoutes(routesResult.results)
+      } catch {
+        // approval routes are optional — silently skip
+      }
+    } catch (e: unknown) {
+      setLoadError(parseApiError(e, 'Failed to load proposal').message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposalId])
+
+  // ── Row save helpers ───────────────────────────────────────────────────────
+
+  function setSaving(key: string, saving: boolean, error: string | null = null) {
+    setSaveStates((prev) => ({ ...prev, [key]: { saving, error } }))
+  }
+
+  async function saveBudgetField(rowId: number, payload: Partial<ProposalBudgetLine>) {
+    const key = `bl-${rowId}`
+    setSaving(key, true)
+    try {
+      const updated = await updateProposalBudgetLine(rowId, payload)
+      setBudgetLines((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+      setSaving(key, false)
+    } catch (e: unknown) {
+      const msg = parseApiError(e, 'Save failed').message
+      const isLockMsg = /lock/i.test(msg) ? 'Proposal is locked. Create a revision to edit.' : msg
+      setSaving(key, false, isLockMsg)
+    }
+  }
+
+  async function saveBreakupField(rowId: number, payload: Partial<ProposalBreakupLine>) {
+    const key = `brk-${rowId}`
+    setSaving(key, true)
+    try {
+      const updated = await updateProposalBreakupLine(rowId, payload)
+      setBreakupLines((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+      setSaving(key, false)
+    } catch (e: unknown) {
+      const msg = parseApiError(e, 'Save failed').message
+      const isLockMsg = /lock/i.test(msg) ? 'Proposal is locked. Create a revision to edit.' : msg
+      setSaving(key, false, isLockMsg)
+    }
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  async function handleSubmitApproval() {
+    if (!proposal) return
+    setApprovalBusy(true)
+    setApprovalError(null)
+    setApprovalSuccess(false)
+    try {
+      const updated = await submitProposalInternalApproval(proposal.id, {
+        approval_route: selectedRoute ? Number(selectedRoute) : null,
+      })
+      setProposal(updated)
+      setApprovalSuccess(true)
+    } catch (e: unknown) {
+      setApprovalError(parseApiError(e, 'Submission failed').message)
+    } finally {
+      setApprovalBusy(false)
+    }
+  }
+
+  async function handleClone() {
+    if (!proposal) return
+    setCloneBusy(true)
+    setCloneError(null)
+    try {
+      const cloned = await cloneProposalRevision(proposal.id)
+      navigate(ROUTES.SALES_PROPOSAL_DETAIL(cloned.id))
+    } catch (e: unknown) {
+      setCloneError(parseApiError(e, 'Clone failed').message)
+      setCloneBusy(false)
+    }
+  }
+
+  async function handleConvert(operationsOwnerId: number) {
+    if (!proposal) return
+    setConvertBusy(true)
+    setConvertError(null)
+    try {
+      const result = await convertProposalToMobilisation(proposal.id, { operations_owner: operationsOwnerId })
+      navigate(`/mobilisation/${result.id}`)
+    } catch (e: unknown) {
+      setConvertError(parseApiError(e, 'Conversion failed').message)
+    } finally {
+      setConvertBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!convertDrawerOpen) return
+    let cancelled = false
+    void (async () => {
+      setOpsUsersLoading(true)
+      setOpsUsersError(null)
+      try {
+        const res = await listUsers({ user_type: 'internal', is_active: true, page: 1 })
+        if (!cancelled) setOpsUsers(res.items)
+      } catch (e: unknown) {
+        if (!cancelled) setOpsUsersError(parseApiError(e, 'Could not load internal users').message)
+      } finally {
+        if (!cancelled) setOpsUsersLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [convertDrawerOpen])
+
+  // ── Tab: Overview ──────────────────────────────────────────────────────────
+
+  function overviewTab() {
+    if (!proposal) return null
+    const financials = [
+      { label: 'Total manpower', value: proposal.manpower_total != null ? String(proposal.manpower_total) : '—', icon: Users, highlight: false },
+      { label: 'Subtotal', value: formatIndianCurrency(proposal.subtotal_amount), icon: IndianRupee, highlight: false },
+      { label: 'Management fee', value: formatIndianCurrency(proposal.management_fee_amount), icon: IndianRupee, highlight: false },
+      { label: 'GST', value: formatIndianCurrency(proposal.gst_amount), icon: IndianRupee, highlight: false },
+      { label: 'Grand total', value: formatIndianCurrency(proposal.grand_total), icon: IndianRupee, highlight: true },
+    ]
+    return (
+      <div className="space-y-6">
+        {/* Financials */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+              <IndianRupee className="h-4 w-4 text-brand-600" />
+            </div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Financial Summary</h3>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {financials.map(({ label, value, icon: Icon, highlight }) => (
+              <div
+                key={label}
+                className={`rounded-xl border p-4 shadow-sm transition-all hover:shadow-md ${
+                  highlight
+                    ? 'border-brand-200 bg-gradient-to-br from-brand-50 to-brand-100/50 dark:border-brand-800 dark:from-brand-900/20 dark:to-brand-900/10'
+                    : 'border-app-border bg-app-surface'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className={`text-lg font-bold ${highlight ? 'text-brand-700 dark:text-brand-400' : 'text-app-text'}`}>
+                      {value}
+                    </p>
+                    <p className={`mt-1 text-xs ${highlight ? 'text-brand-600/70 dark:text-brand-500/70' : 'text-app-subtle'}`}>{label}</p>
+                  </div>
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                    highlight ? 'bg-brand-500/10 text-brand-600' : 'bg-slate-500/10 text-slate-500'
+                  }`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Status */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+              <CheckCircle2 className="h-4 w-4 text-brand-600" />
+            </div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Status Overview</h3>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+              <p className="text-xs text-app-subtle mb-2">Proposal status</p>
+              <Badge variant={proposalStatusVariant(proposal.status)} className="text-xs">
+                {proposalStatusLabel(proposal.status)}
+              </Badge>
+            </div>
+            {proposal.client_approval_status ? (
+              <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                <p className="text-xs text-app-subtle mb-2">Client response</p>
+                <Badge variant={proposalStatusVariant(proposal.client_approval_status)} className="text-xs">
+                  {proposalStatusLabel(proposal.client_approval_status)}
+                </Badge>
+              </div>
+            ) : null}
+            <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-app-subtle" />
+                <div>
+                  <p className="text-xs text-app-subtle">Last updated</p>
+                  <p className="text-sm font-medium text-app-text">{formatDateTime(proposal.updated_at)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Source */}
+        {lead ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <FileText className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Source Lead</h3>
+            </div>
+            <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-app-text">{lead.client_name}</p>
+                  {lead.existing_client_name ? (
+                    <p className="text-xs text-app-subtle mt-0.5">{lead.existing_client_name}</p>
+                  ) : null}
+                  {lead.sales_person_name ? (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-app-secondary">
+                      <Users className="h-3 w-3" />
+                      Owner: <span className="font-medium">{lead.sales_person_name}</span>
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <Badge variant={leadTypeVariant(lead.lead_type)} className="text-xs">{LEAD_TYPE_LABELS[lead.lead_type]}</Badge>
+                  <Button
+                    variant="secondary"
+                    className="min-h-8 px-3 text-xs rounded-lg"
+                    onClick={() => navigate(ROUTES.SALES_LEAD_DETAIL(lead.id))}
+                  >
+                    <ArrowLeft className="mr-1 h-3 w-3 rotate-180" />
+                    View lead
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {/* Notes */}
+        {proposal.notes ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-500/10">
+                <FileText className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Notes</h3>
+            </div>
+            <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+              <p className="whitespace-pre-line text-sm text-app-text leading-relaxed">{proposal.notes}</p>
+            </div>
+          </section>
+        ) : null}
+
+        {/* CTAs */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+              <Send className="h-4 w-4 text-brand-600" />
+            </div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Quick Actions</h3>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {canEdit ? (
+              <Button variant="secondary" className="rounded-lg" onClick={() => setTab('budget-lines')}>
+                <FileText className="mr-1.5 h-4 w-4" />
+                Edit budget lines
+              </Button>
+            ) : null}
+            {canUpdate && !isLocked ? (
+              <Button variant="secondary" className="rounded-lg" onClick={() => setTab('approval')}>
+                <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                Submit for approval
+              </Button>
+            ) : null}
+            {canSendToClient && proposal.status === 'internally_approved' ? (
+              <Button className="rounded-lg bg-emerald-600 hover:bg-emerald-700" onClick={() => setTab('client-response')}>
+                <Send className="mr-1.5 h-4 w-4" />
+                Send to client
+              </Button>
+            ) : null}
+            {canUpdate && isLocked ? (
+              <Button variant="secondary" className="rounded-lg" onClick={() => void handleClone()} disabled={cloneBusy}>
+                <FileText className="mr-1.5 h-4 w-4" />
+                {cloneBusy ? 'Creating…' : 'Create revision'}
+              </Button>
+            ) : null}
+          </div>
+          {cloneError ? <p className="mt-2 text-sm text-status-danger">{cloneError}</p> : null}
+        </section>
+
+        <p className="flex items-center gap-1.5 text-xs text-app-subtle">
+          <FileText className="h-3 w-3" />
+          Calculation rules are managed separately.
+        </p>
+      </div>
+    )
+  }
+
+  // ── Tab: Budget Lines ──────────────────────────────────────────────────────
+
+  function budgetLinesTab() {
+    // Calculate totals for display
+    const totalManpower = budgetLines.reduce((sum, r) => sum + (r.manpower_count ?? 0), 0)
+    const totalCost = budgetLines.reduce((sum, r) => {
+      const cost = typeof r.total_cost === 'string' ? parseFloat(r.total_cost.replace(/,/g, '')) : (r.total_cost ?? 0)
+      return sum + (isNaN(cost) ? 0 : cost)
+    }, 0)
+
+    return (
+      <div className="space-y-4">
+        {isLocked ? (
+          <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>Proposal is locked — create a revision to edit.</span>
+          </div>
+        ) : null}
+
+        {budgetLines.length === 0 ? (
+          <EmptyState title="No budget lines" description="Budget lines will appear here once added by the backend." />
+        ) : (
+          <>
+            {/* Summary cards */}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/10">
+                    <Users className="h-4 w-4 text-brand-500" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-app-text">{totalManpower}</p>
+                    <p className="text-xs text-app-subtle">Total Manpower</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/10">
+                    <IndianRupee className="h-4 w-4 text-brand-500" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-app-text">{formatIndianCurrency(totalCost)}</p>
+                    <p className="text-xs text-app-subtle">Total Cost</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-500/10">
+                    <FileText className="h-4 w-4 text-slate-500" />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-app-text">{budgetLines.length}</p>
+                    <p className="text-xs text-app-subtle">Budget Lines</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="overflow-hidden rounded-xl border border-app-border shadow-sm">
+              <Table>
+                <THead>
+                  <TR className="bg-slate-50 dark:bg-slate-800/50">
+                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Role / Service</TH>
+                    <TH className="py-3 px-4 text-center text-xs font-semibold uppercase tracking-wider text-app-subtle">Manpower</TH>
+                    <TH className="py-3 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">Unit Cost</TH>
+                    <TH className="py-3 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">Total Cost</TH>
+                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Remarks</TH>
+                    <TH className="py-3 px-4 w-16">{''}</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {budgetLines.map((row, idx) => {
+                    const key = `bl-${row.id}`
+                    return (
+                      <TR key={row.id} className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? 'bg-app-surface' : 'bg-slate-50/50 dark:bg-slate-800/20'}`}>
+                        <TD className="py-3 px-4">
+                          <p className="text-sm font-medium text-app-text">{row.job_role_name ?? '—'}</p>
+                          {row.site_name ? (
+                            <p className="text-xs text-app-subtle">{row.site_name}</p>
+                          ) : null}
+                        </TD>
+                        <TD className="py-2 px-4 text-center">
+                          {canEdit ? (
+                            <input
+                              type="number"
+                              className={CELL + ' text-center w-16 mx-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                              value={row.manpower_count ?? ''}
+                              onChange={(e) => {
+                                const val = e.target.value === '' ? null : Number(e.target.value)
+                                setBudgetLines((prev) =>
+                                  prev.map((r) => (r.id === row.id ? { ...r, manpower_count: val } : r)),
+                                )
+                              }}
+                              onBlur={(e) =>
+                                void saveBudgetField(row.id, {
+                                  manpower_count: e.currentTarget.value === '' ? null : Number(e.currentTarget.value),
+                                })
+                              }
+                            />
+                          ) : (
+                            <span className="inline-flex h-7 w-12 items-center justify-center rounded-lg bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-900/20 dark:text-brand-400">{row.manpower_count ?? '—'}</span>
+                          )}
+                        </TD>
+                        <TD className="py-2 px-4 text-right">
+                          {canEdit ? (
+                            <input
+                              className={CELL + ' text-right w-28 ml-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                              value={row.unit_cost ?? ''}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setBudgetLines((prev) =>
+                                  prev.map((r) => (r.id === row.id ? { ...r, unit_cost: val } : r)),
+                                )
+                              }}
+                              onBlur={(e) =>
+                                void saveBudgetField(row.id, { unit_cost: e.currentTarget.value || null })
+                              }
+                            />
+                          ) : (
+                            <span className="text-sm font-medium text-app-secondary">{formatIndianCurrency(row.unit_cost)}</span>
+                          )}
+                        </TD>
+                        <TD className="py-3 px-4 text-right">
+                          <span className="text-sm font-semibold text-brand-600 dark:text-brand-400">{formatIndianCurrency(row.total_cost)}</span>
+                        </TD>
+                        <TD className="py-2 px-4">
+                          {canEdit ? (
+                            <input
+                              className={CELL + ' w-full rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                              value={row.remarks ?? ''}
+                              placeholder="Add remarks..."
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setBudgetLines((prev) =>
+                                  prev.map((r) => (r.id === row.id ? { ...r, remarks: val } : r)),
+                                )
+                              }}
+                              onBlur={(e) =>
+                                void saveBudgetField(row.id, { remarks: e.currentTarget.value || undefined })
+                              }
+                            />
+                          ) : (
+                            <span className="text-sm text-app-secondary">{row.remarks ?? '—'}</span>
+                          )}
+                        </TD>
+                        <TD className="py-3 px-4 text-right">{rowStatus(saveStates, key)}</TD>
+                      </TR>
+                    )
+                  })}
+                </TBody>
+              </Table>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ── Tab: Salary Breakup ────────────────────────────────────────────────────
+
+  function groupBreakup(lines: ProposalBreakupLine[]): [string, ProposalBreakupLine[]][] {
+    const map = new Map<string, ProposalBreakupLine[]>()
+    for (const l of lines) {
+      const key = l.component_type ?? 'Other'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(l)
+    }
+    return [...map.entries()]
+  }
+
+  function salaryBreakupTab() {
+    // Get category colors - semantic colors only for borders and text, neutral backgrounds
+    const getCategoryStyle = (type: string) => {
+      const lower = type.toLowerCase()
+      if (lower.includes('earning') || lower.includes('basic')) {
+        return { border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-700 dark:text-emerald-400' }
+      }
+      if (lower.includes('deduction')) {
+        return { border: 'border-red-200 dark:border-red-800', text: 'text-red-700 dark:text-red-400' }
+      }
+      if (lower.includes('allowance')) {
+        return { border: 'border-blue-200 dark:border-blue-800', text: 'text-blue-700 dark:text-blue-400' }
+      }
+      if (lower.includes('total') || lower.includes('gross') || lower.includes('net')) {
+        return { border: 'border-purple-200 dark:border-purple-800', text: 'text-purple-700 dark:text-purple-400' }
+      }
+      return { border: 'border-app-border', text: 'text-app-text' }
+    }
+
+    // Calculate totals per category
+    const groupedData = groupBreakup(breakupLines)
+    const categoryTotals = groupedData.map(([type, lines]) => {
+      const total = lines.reduce((sum, l) => {
+        const amt = typeof l.amount === 'string' ? parseFloat(l.amount.replace(/,/g, '')) : (l.amount ?? 0)
+        return sum + (isNaN(amt) ? 0 : amt)
+      }, 0)
+      return { type, total, count: lines.length }
+    })
+
+    return (
+      <div className="space-y-5">
+        {isLocked ? (
+          <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>Proposal is locked — create a revision to edit.</span>
+          </div>
+        ) : null}
+
+        {breakupLines.length === 0 ? (
+          <EmptyState title="No salary breakup lines" description="Breakup lines will appear here once computed by the backend." />
+        ) : (
+          <>
+            {/* Category summary cards - neutral bg with semantic border and text */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {categoryTotals.map(({ type, total, count }) => {
+                const style = getCategoryStyle(type)
+                return (
+                  <div key={type} className={`rounded-xl border ${style.border} bg-app-surface p-4 shadow-sm`}>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className={`text-lg font-bold ${style.text}`}>{formatIndianCurrency(total)}</p>
+                        <p className="mt-0.5 text-xs text-app-subtle capitalize">{type.replace(/_/g, ' ')}</p>
+                      </div>
+                      <span className="rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 text-xs font-medium">
+                        {count} items
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Breakup sections */}
+            <div className="space-y-5">
+              {groupedData.map(([type, lines]) => {
+                const style = getCategoryStyle(type)
+                const sortedLines = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                const sectionTotal = lines.reduce((sum, l) => {
+                  const amt = typeof l.amount === 'string' ? parseFloat(l.amount.replace(/,/g, '')) : (l.amount ?? 0)
+                  return sum + (isNaN(amt) ? 0 : amt)
+                }, 0)
+
+                return (
+                  <div key={type} className={`rounded-xl border ${style.border} overflow-hidden shadow-sm`}>
+                    {/* Section header - brand colors with neutral bg */}
+                    <div className={`flex items-center justify-between bg-brand-500/10 px-4 py-3 border-b ${style.border}`}>
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-brand-600 dark:bg-brand-900/30 dark:text-brand-400">
+                          <IndianRupee className="h-4 w-4" />
+                        </div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400">
+                          {type.replace(/_/g, ' ')}
+                        </h3>
+                        <span className="rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 text-xs">
+                          {lines.length} components
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-bold ${style.text}`}>{formatIndianCurrency(sectionTotal)}</p>
+                        <p className="text-[10px] uppercase tracking-wider text-app-subtle">Section Total</p>
+                      </div>
+                    </div>
+
+                    {/* Section table */}
+                    <div className="overflow-x-auto bg-app-surface">
+                      <Table>
+                        <THead>
+                          <TR className="bg-slate-50/50 dark:bg-slate-800/30">
+                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Component</TH>
+                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle w-24">Code</TH>
+                            <TH className="py-2.5 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-28">Percentage</TH>
+                            <TH className="py-2.5 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-32">Amount</TH>
+                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Notes</TH>
+                            <TH className="py-2.5 px-4 w-14">{''}</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {sortedLines.map((row, idx) => {
+                            const key = `brk-${row.id}`
+                            return (
+                              <TR key={row.id} className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? '' : 'bg-slate-50/30 dark:bg-slate-800/10'}`}>
+                                <TD className="py-2.5 px-4">
+                                  <p className="text-sm font-medium text-app-text">{row.component_name ?? '—'}</p>
+                                </TD>
+                                <TD className="py-2.5 px-4">
+                                  <code className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-mono text-app-subtle">{row.component_code ?? '—'}</code>
+                                </TD>
+                                <TD className="py-2.5 px-4 text-right">
+                                  {row.percentage != null ? (
+                                    <span className="inline-flex items-center rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-xs font-medium text-brand-700 dark:text-brand-400">
+                                      {row.percentage}%
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm text-app-subtle">—</span>
+                                  )}
+                                </TD>
+                                <TD className="py-2 px-4 text-right">
+                                  {canEdit ? (
+                                    <input
+                                      className={CELL + ' text-right w-28 ml-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                                      value={row.amount ?? ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value
+                                        setBreakupLines((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, amount: val } : r)),
+                                        )
+                                      }}
+                                      onBlur={(e) =>
+                                        void saveBreakupField(row.id, { amount: e.currentTarget.value || null })
+                                      }
+                                    />
+                                  ) : (
+                                    <span className={`text-sm font-semibold ${style.text}`}>{formatIndianCurrency(row.amount)}</span>
+                                  )}
+                                </TD>
+                                <TD className="py-2 px-4">
+                                  {canEdit ? (
+                                    <input
+                                      className={CELL + ' w-full rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                                      value={row.remarks ?? ''}
+                                      placeholder="Add notes..."
+                                      onChange={(e) => {
+                                        const val = e.target.value
+                                        setBreakupLines((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, remarks: val } : r)),
+                                        )
+                                      }}
+                                      onBlur={(e) =>
+                                        void saveBreakupField(row.id, { remarks: e.currentTarget.value || undefined })
+                                      }
+                                    />
+                                  ) : (
+                                    <span className="text-sm text-app-secondary">{row.remarks ?? '—'}</span>
+                                  )}
+                                </TD>
+                                <TD className="py-2.5 px-4 text-right">{rowStatus(saveStates, key)}</TD>
+                              </TR>
+                            )
+                          })}
+                        </TBody>
+                      </Table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <p className="text-xs text-app-subtle flex items-center gap-1.5">
+              <FileText className="h-3 w-3" />
+              Calculation rules are managed separately in proposal settings.
+            </p>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ── Tab: Approval ──────────────────────────────────────────────────────────
+
+  function approvalTab() {
+    if (!proposal) return null
+    const canSubmit = canUpdate && !isLocked
+
+    const selectedRouteObj = approvalRoutes.find((r) => String(r.id) === selectedRoute)
+
+    return (
+      <div className="space-y-6">
+        {/* Submit form */}
+        {canSubmit ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <CheckCircle2 className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Submit for Internal Approval</h3>
+            </div>
+            <div className="space-y-4">
+              {approvalRoutes.length > 0 ? (
+                <Select
+                  id="approval-route"
+                  label="Approval route"
+                  value={selectedRoute}
+                  onChange={(e) => setSelectedRoute(e.target.value)}
+                >
+                  <option value="">— Default route —</option>
+                  {approvalRoutes.map((r) => (
+                    <option key={r.id} value={String(r.id)}>
+                      {r.name}{r.is_default ? ' (default)' : ''}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+
+              {/* Route preview */}
+              {selectedRouteObj && selectedRouteObj.steps.length > 0 ? (
+                <div className="rounded-xl border border-brand-200 bg-brand-50/50 dark:border-brand-800 dark:bg-brand-900/10 p-4 shadow-sm">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">
+                    Approval Steps
+                  </p>
+                  <ol className="space-y-2.5">
+                    {selectedRouteObj.steps.map((step) => (
+                      <li key={step.step_code} className="flex items-center gap-2.5 text-sm">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500 text-xs font-bold text-white shadow-sm">
+                          {step.order}
+                        </span>
+                        <span className="font-medium text-app-text">{step.step_name}</span>
+                        {step.assigned_user_username ? (
+                          <span className="flex items-center gap-1 text-app-subtle">
+                            <Users className="h-3 w-3" />
+                            {step.assigned_user_username}
+                          </span>
+                        ) : step.department_name ? (
+                          <span className="text-app-subtle">→ {step.department_name}</span>
+                        ) : null}
+                        {!step.assignment_ok ? (
+                          <Badge variant="danger" className="text-xs">Unassigned</Badge>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+
+              {approvalSuccess ? (
+                <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Submitted for internal approval. The proposal is now pending review.
+                </div>
+              ) : null}
+
+              {approvalError ? <p className="text-sm text-status-danger">{approvalError}</p> : null}
+
+              <Button
+                className="rounded-lg"
+                onClick={() => void handleSubmitApproval()}
+                disabled={approvalBusy || approvalSuccess}
+              >
+                <Send className="mr-1.5 h-4 w-4" />
+                {approvalBusy ? 'Submitting…' : 'Submit for internal approval'}
+              </Button>
+            </div>
+          </section>
+        ) : (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <CheckCircle2 className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Internal Approval</h3>
+            </div>
+            <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+              <div className="flex items-center gap-3">
+                <Badge variant={proposalStatusVariant(proposal.status)} className="text-xs">
+                  {proposalStatusLabel(proposal.status)}
+                </Badge>
+                <p className="text-sm text-app-secondary">
+                  {isLocked
+                    ? 'Proposal has been submitted and is no longer editable.'
+                    : 'Proposal is in draft — submit above to start the approval process.'}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 flex items-center gap-1.5 text-sm text-app-secondary">
+              <FileText className="h-3 w-3" />
+              Approval tasks can be found in{' '}
+              <button
+                type="button"
+                className="text-brand-600 underline hover:no-underline"
+                onClick={() => navigate('/my-tasks')}
+              >
+                My Tasks
+              </button>
+              .
+            </p>
+          </section>
+        )}
+      </div>
+    )
+  }
+
+  // ── Tab: Client Response ───────────────────────────────────────────────────
+
+  function clientResponseTab() {
+    if (!proposal) return null
+    const canSend = canSendToClient && proposal.status === 'internally_approved'
+
+    return (
+      <div className="space-y-6">
+        {/* Send section */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+              <Send className="h-4 w-4 text-brand-600" />
+            </div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Send to Client</h3>
+          </div>
+          {canSend ? (
+            <Button className="rounded-lg bg-brand-600 hover:bg-brand-700" onClick={() => setSendDrawerOpen(true)}>
+              <Send className="mr-1.5 h-4 w-4" />
+              Send proposal to client
+            </Button>
+          ) : (
+            <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+              <p className="text-sm text-app-secondary">
+                {proposal.status === 'internally_approved'
+                  ? 'You do not have permission to send proposals to clients.'
+                  : 'Proposal must be internally approved before sending to the client.'}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Client response summary */}
+        {proposal.client_approval_status ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <Users className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Client Response</h3>
+            </div>
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                  <dt className="text-xs text-app-subtle mb-2">Response</dt>
+                  <Badge variant={proposalStatusVariant(proposal.client_approval_status)} className="text-xs">
+                    {proposalStatusLabel(proposal.client_approval_status)}
+                  </Badge>
+                </div>
+                {(proposal.client_response_at ?? proposal.client_approved_at) ? (
+                  <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                    <dt className="flex items-center gap-1.5 text-xs text-app-subtle mb-2">
+                      <Clock className="h-3 w-3" />
+                      Responded at
+                    </dt>
+                    <dd className="text-sm font-medium text-app-text">
+                      {formatDateTime(proposal.client_response_at ?? proposal.client_approved_at)}
+                    </dd>
+                  </div>
+                ) : null}
+              </div>
+              {proposal.client_remarks ? (
+                <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-app-subtle">
+                    <FileText className="h-3 w-3" />
+                    Client remarks
+                  </p>
+                  <p className="whitespace-pre-line text-sm text-app-text leading-relaxed">{proposal.client_remarks}</p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : proposal.status === 'sent_to_client' ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-900/10 p-4">
+            <div className="flex items-center gap-2.5">
+              <Clock className="h-4 w-4 text-amber-600" />
+              <p className="text-sm text-amber-700 dark:text-amber-400">Awaiting client response...</p>
+            </div>
+          </section>
+        ) : null}
+
+        {/* Convert to mobilisation */}
+        {canApproveProposal ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <CheckCircle2 className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Convert to Mobilisation</h3>
+            </div>
+            {proposal.client_approval_status === 'approved' ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10 p-5 shadow-sm">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Client has approved this proposal!</p>
+                    <p className="mt-1 text-sm text-emerald-600/70 dark:text-emerald-500/70">
+                      Convert now to kick off the mobilisation process.
+                    </p>
+                    <Button
+                      className="mt-3 rounded-lg bg-emerald-600 hover:bg-emerald-700"
+                      onClick={() => {
+                        setConvertValidationError(null)
+                        setConvertError(null)
+                        setOperationsOwner('')
+                        setConvertDrawerOpen(true)
+                      }}
+                      disabled={convertBusy}
+                    >
+                      <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                      Convert to mobilisation
+                    </Button>
+                    {convertError ? <p className="mt-2 text-sm text-status-danger">{convertError}</p> : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+                <p className="text-sm text-app-secondary">
+                  Available once the client approves the proposal.
+                </p>
+              </div>
+            )}
+          </section>
+        ) : null}
+      </div>
+    )
+  }
+
+  function convertDrawer() {
+    if (!proposal) return null
+    const ownerId = operationsOwner.trim() ? Number(operationsOwner.trim()) : NaN
+    const canSubmit = Number.isFinite(ownerId) && ownerId > 0
+    return (
+      <Drawer
+        open={convertDrawerOpen}
+        title="Convert to mobilisation"
+        description="Select an operations owner. This person will complete departments and client users before finalization."
+        onClose={() => !convertBusy && setConvertDrawerOpen(false)}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={convertBusy}
+              onClick={() => setConvertDrawerOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={convertBusy}
+              onClick={() => {
+                if (!canSubmit) {
+                  setConvertValidationError('Select an operations owner before converting.')
+                  return
+                }
+                setConvertValidationError(null)
+                void handleConvert(ownerId)
+              }}
+            >
+              {convertBusy ? 'Converting…' : 'Convert'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <Select
+            id="ops_owner"
+            label="Operations owner"
+            value={operationsOwner}
+            onChange={(e) => setOperationsOwner(e.target.value)}
+            disabled={opsUsersLoading || convertBusy}
+            error={convertValidationError ?? undefined}
+          >
+            <option value="">{opsUsersLoading ? 'Loading users…' : 'Select a user'}</option>
+            {opsUsers.map((u) => (
+              <option key={u.id} value={String(u.id)}>
+                {u.username} ({u.first_name} {u.last_name})
+              </option>
+            ))}
+          </Select>
+          <p className="text-xs text-app-subtle">
+            This person will complete departments and client users before finalization.
+          </p>
+          {opsUsersError ? <ErrorState message={opsUsersError} /> : null}
+          {convertError ? <ErrorState message={convertError} /> : null}
+        </div>
+      </Drawer>
+    )
+  }
+
+  // ── Tab: Revision History ──────────────────────────────────────────────────
+
+  function revisionHistoryTab() {
+    if (!proposal) return null
+    return (
+      <div className="space-y-6">
+        {/* Current version */}
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+              <FileText className="h-4 w-4 text-brand-600" />
+            </div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Current Version</h3>
+          </div>
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: 'Version', value: `v${proposal.version_number}`, highlight: true },
+              { label: 'Status', value: proposalStatusLabel(proposal.status), badge: true },
+              { label: 'Valid from', value: formatShortDate(proposal.valid_from) },
+              { label: 'Valid to', value: formatShortDate(proposal.valid_to) },
+            ].map(({ label, value, highlight, badge }) => (
+              <div key={label} className={`rounded-xl border p-4 shadow-sm ${highlight ? 'border-brand-200 bg-brand-50/50 dark:border-brand-800 dark:bg-brand-900/20' : 'border-app-border bg-app-surface'}`}>
+                <dt className="text-xs text-app-subtle">{label}</dt>
+                {badge ? (
+                  <dd className="mt-2">
+                    <Badge variant={proposalStatusVariant(proposal.status)} className="text-xs">
+                      {value}
+                    </Badge>
+                  </dd>
+                ) : (
+                  <dd className={`mt-1 text-base font-semibold ${highlight ? 'text-brand-600 dark:text-brand-400' : 'text-app-text'}`}>{value}</dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        {/* Clone CTA */}
+        {isLocked && canUpdate ? (
+          <section className="rounded-xl border border-dashed border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
+                <FileText className="h-5 w-5 text-brand-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-app-text">Create a new revision</p>
+                <p className="mt-1 text-sm text-app-secondary">
+                  Clone this proposal to create a new editable version with the same budget lines and breakup components.
+                </p>
+                <Button className="mt-3 rounded-lg" onClick={() => void handleClone()} disabled={cloneBusy}>
+                  <FileText className="mr-1.5 h-4 w-4" />
+                  {cloneBusy ? 'Creating…' : 'Create revision'}
+                </Button>
+                {cloneError ? <p className="mt-2 text-sm text-status-danger">{cloneError}</p> : null}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {/* All versions */}
+        {allVersions.length > 1 ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <Clock className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Version History</h3>
+              <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+                {allVersions.length} versions
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-xl border border-app-border shadow-sm">
+              <Table>
+                <THead>
+                  <TR className="bg-slate-50 dark:bg-slate-800/50">
+                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Version</TH>
+                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Status</TH>
+                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Created</TH>
+                    <TH className="py-3 px-4 w-24">{''}</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {allVersions.map((v, idx) => (
+                    <TR key={v.id} className={`transition-colors ${v.id === proposalId ? 'bg-brand-50/50 dark:bg-brand-900/10' : idx % 2 === 0 ? 'bg-app-surface' : 'bg-slate-50/50 dark:bg-slate-800/20'}`}>
+                      <TD className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                            v{v.version_number}
+                          </span>
+                          {v.id === proposalId ? (
+                            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">current</span>
+                          ) : null}
+                        </div>
+                      </TD>
+                      <TD className="py-3 px-4">
+                        <Badge variant={proposalStatusVariant(v.status)} className="text-xs">
+                          {proposalStatusLabel(v.status)}
+                        </Badge>
+                      </TD>
+                      <TD className="py-3 px-4">
+                        <span className="flex items-center gap-1.5 text-sm text-app-secondary">
+                          <Clock className="h-3 w-3" />
+                          {formatShortDate(v.created_at)}
+                        </span>
+                      </TD>
+                      <TD className="py-3 px-4 text-right">
+                        {v.id !== proposalId ? (
+                          <Button
+                            variant="secondary"
+                            className="min-h-8 px-3 text-xs rounded-lg"
+                            onClick={() => navigate(ROUTES.SALES_PROPOSAL_DETAIL(v.id))}
+                          >
+                            View
+                          </Button>
+                        ) : null}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          </section>
+        ) : null}
+      </div>
+    )
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (loading) return <Spinner label="Loading proposal…" />
+  if (loadError) return <ErrorState message={loadError} />
+  if (!proposal) return null
+
+  return (
+    <div className="w-full space-y-4">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => navigate(ROUTES.SALES_LEAD_DETAIL(proposal.lead))}
+            className="mb-1 flex items-center gap-1 text-xs text-app-subtle hover:text-app-text transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            Back to lead
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600">
+                <FileText className="h-4 w-4" />
+              </div>
+              <h2 className="text-lg font-semibold text-app-text">Proposal v{proposal.version_number}</h2>
+            </div>
+            <Badge variant={proposalStatusVariant(proposal.status)}>
+              {proposalStatusLabel(proposal.status)}
+            </Badge>
+            {isLocked ? (
+              <span className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                <Lock className="h-3 w-3" />
+                Locked
+              </span>
+            ) : null}
+          </div>
+          {lead ? (
+            <p className="mt-0.5 text-sm text-app-secondary">{lead.client_name}</p>
+          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-app-subtle">
+            {proposal.grand_total ? (
+              <span className="flex items-center gap-1">
+                <IndianRupee className="h-3 w-3" />
+                Grand total: <span className="font-semibold text-app-text">{formatIndianCurrency(proposal.grand_total)}</span>
+              </span>
+            ) : null}
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              Updated {formatDateTime(proposal.updated_at)}
+            </span>
+          </div>
+        </div>
+
+        {/* Quick stats */}
+        <div className="flex flex-wrap gap-3">
+          {proposal.manpower_total != null ? (
+            <div className="flex items-center gap-2 rounded-lg border border-app-border bg-app-surface px-3 py-2">
+              <Users className="h-4 w-4 text-brand-500" />
+              <div className="text-right">
+                <p className="text-lg font-bold text-app-text">{proposal.manpower_total}</p>
+                <p className="text-[10px] uppercase tracking-wider text-app-subtle">Manpower</p>
+              </div>
+            </div>
+          ) : null}
+          {proposal.status === 'internally_approved' ? (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20 px-3 py-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              <div className="text-right">
+                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Approved</p>
+                <p className="text-[10px] uppercase tracking-wider text-emerald-600/70 dark:text-emerald-500/70">Ready to send</p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 overflow-x-auto border-b border-app-border">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`-mb-px shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              tab === t.id
+                ? 'border-brand-600 text-brand-600'
+                : 'border-transparent text-app-secondary hover:text-app-text'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="min-h-40 rounded-xl border border-app-border bg-app-surface p-5 shadow-sm">
+        {tab === 'overview' && overviewTab()}
+        {tab === 'budget-lines' && budgetLinesTab()}
+        {tab === 'salary-breakup' && salaryBreakupTab()}
+        {tab === 'approval' && approvalTab()}
+        {tab === 'client-response' && clientResponseTab()}
+        {tab === 'revision-history' && revisionHistoryTab()}
+      </div>
+
+      <SendToClientDrawer
+        open={sendDrawerOpen}
+        proposalId={proposal.id}
+        lead={lead}
+        onClose={() => setSendDrawerOpen(false)}
+        onSent={(updated) => {
+          setProposal(updated)
+          setSendDrawerOpen(false)
+        }}
+      />
+      {convertDrawer()}
+    </div>
+  )
+}
