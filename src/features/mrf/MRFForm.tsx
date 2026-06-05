@@ -18,7 +18,10 @@ import {
   loadBillableBudgetOptionsForSite,
   loadNonBillableBudgetOptionsForDepartments,
 } from '@/features/budgets/budgetLookup'
+import { isClientFacingUser } from '@/features/mrf/mrfClientMode'
 import { useAuthStore } from '@/features/auth/authStore'
+
+export { isClientFacingUser }
 
 export type { DepartmentOption } from '@/api/departments'
 
@@ -62,8 +65,6 @@ const REQUESTER_TYPES: { value: RequestedByType; label: string }[] = [
   { value: 'client', label: 'Client' },
 ]
 
-const CLIENT_FACING_ROLE_CODES = new Set(['client_admin', 'client_site_user', 'site_supervisor', 'client_user'])
-
 function isPastDate(yyyyMmDd: string): boolean {
   if (!yyyyMmDd) return false
   const d = new Date(`${yyyyMmDd}T00:00:00`)
@@ -75,12 +76,6 @@ function isPastDate(yyyyMmDd: string): boolean {
 
 function optionLabel(o: DepartmentOption) {
   return o.scopeLabel ? `${o.label} — ${o.scopeLabel}` : o.label
-}
-
-function isClientFacingMe(me: ReturnType<typeof useAuthStore.getState>['me']): boolean {
-  if (!me || me.is_superuser) return false
-  const roleCodes = (me.role_assignments ?? []).map((r) => r.role_code).filter(Boolean)
-  return roleCodes.length > 0 && roleCodes.every((code) => CLIENT_FACING_ROLE_CODES.has(code))
 }
 
 function normalizeClientRequestedValues(values: MRFFormValues): MRFFormValues {
@@ -125,7 +120,7 @@ export function MRFForm({
   onSubmit: (values: MRFFormValues) => void | Promise<void>
 }) {
   const me = useAuthStore((s) => s.me)
-  const clientFacingRequester = isClientFacingMe(me)
+  const clientFacingRequester = isClientFacingUser(me)
   const [values, setValues] = useState<MRFFormValues>(() =>
     normalizeClientRequestedValues({
       site: initialMRF?.site != null ? String(initialMRF.site) : '',
@@ -171,13 +166,16 @@ export function MRFForm({
   const isBillable = values.billing_type === 'billable'
   const isNonBillable = values.billing_type === 'non_billable'
   const isClientRequested = values.requested_by_type === 'client'
+  const isClientMrfUi = clientFacingRequester || isClientRequested
   const mrfTypeOptions = isClientRequested ? CLIENT_MRF_TYPES : MRF_TYPES
   const clientFieldsError = useMemo(
     () => (isNonBillable ? validateMrfClientFields(values) : null),
     [values, isNonBillable],
   )
   const budgetHelperCopy = isBillable
-    ? 'Billable budgets are tied to client/site/department manpower.'
+    ? isClientMrfUi
+      ? 'Billable budgets are tied to approved client site manpower.'
+      : 'Billable budgets are tied to client/site/department manpower.'
     : 'Non-billable budgets are tied to internal department hiring.'
 
   const contextSig = `${values.site}|${values.billing_type}|${values.requesting_department}|${values.required_department}`
@@ -298,7 +296,7 @@ export function MRFForm({
     <form id={formId} onSubmit={handleSubmit} className="space-y-4">
       {errorMessage ? <ErrorState message={errorMessage} /> : null}
       {lookupError ? <ErrorState message={`Site lookup failed. Create/Edit is disabled. ${lookupError}`} /> : null}
-      {departmentLookupError ? (
+      {!isClientMrfUi && departmentLookupError ? (
         <ErrorState message={`Department lookup failed. Department selects are disabled. ${departmentLookupError}`} />
       ) : null}
 
@@ -326,7 +324,7 @@ export function MRFForm({
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {!isClientRequested ? (
+        {!isClientMrfUi ? (
           <Select
             id="mrf_billing_type"
             label="Billing type"
@@ -341,19 +339,21 @@ export function MRFForm({
             ))}
           </Select>
         ) : null}
-        <Select
-          id="mrf_type"
-          label="MRF type"
-          value={values.mrf_type}
-          onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
-          disabled={submitting}
-        >
-          {mrfTypeOptions.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </Select>
+        {!isClientMrfUi ? (
+          <Select
+            id="mrf_type"
+            label="MRF type"
+            value={values.mrf_type}
+            onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
+            disabled={submitting}
+          >
+            {mrfTypeOptions.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+        ) : null}
       </div>
 
       <p className="text-sm font-semibold text-app-text">
@@ -381,46 +381,50 @@ export function MRFForm({
         ) : null}
       </div>
 
-      <div className="space-y-1">
-        <Select
-          id="mrf_requesting_department"
-          label="Requesting department"
-          value={values.requesting_department}
-          onChange={(e) => setValues((v) => ({ ...v, requesting_department: e.target.value }))}
-          disabled={deptSelectDisabled}
-        >
-          <option value="">None (backend uses your user department on create)</option>
-          {departmentOptionsForSelectedSite.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {optionLabel(o)}
-            </option>
-          ))}
-        </Select>
-        <p className="text-xs text-app-subtle">
-          Optional. If blank, backend uses your user department when creating.
-        </p>
-        {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments…</p> : null}
-      </div>
+      {!isClientMrfUi ? (
+        <div className="space-y-1">
+          <Select
+            id="mrf_requesting_department"
+            label="Requesting department"
+            value={values.requesting_department}
+            onChange={(e) => setValues((v) => ({ ...v, requesting_department: e.target.value }))}
+            disabled={deptSelectDisabled}
+          >
+            <option value="">None (backend uses your user department on create)</option>
+            {departmentOptionsForSelectedSite.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {optionLabel(o)}
+              </option>
+            ))}
+          </Select>
+          <p className="text-xs text-app-subtle">
+            Optional. If blank, backend uses your user department when creating.
+          </p>
+          {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments…</p> : null}
+        </div>
+      ) : null}
 
-      <div className="space-y-1">
-        <Select
-          id="mrf_required_department"
-          label="Required department"
-          value={values.required_department}
-          onChange={(e) => setValues((v) => ({ ...v, required_department: e.target.value }))}
-          disabled={deptSelectDisabled}
-        >
-          <option value="">None</option>
-          {departmentOptionsForSelectedSite.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {optionLabel(o)}
-            </option>
-          ))}
-        </Select>
-        <p className="text-xs text-app-subtle">
-          Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.
-        </p>
-      </div>
+      {!isClientMrfUi ? (
+        <div className="space-y-1">
+          <Select
+            id="mrf_required_department"
+            label="Required department"
+            value={values.required_department}
+            onChange={(e) => setValues((v) => ({ ...v, required_department: e.target.value }))}
+            disabled={deptSelectDisabled}
+          >
+            <option value="">None</option>
+            {departmentOptionsForSelectedSite.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {optionLabel(o)}
+              </option>
+            ))}
+          </Select>
+          <p className="text-xs text-app-subtle">
+            Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.
+          </p>
+        </div>
+      ) : null}
 
       {!clientFacingRequester ? (
         <Select
@@ -554,19 +558,37 @@ export function MRFForm({
 }
 
 export function mrfFormValuesToWritePayload(values: MRFFormValues, mode: 'create' | 'edit' = 'edit'): MRFWriteInput {
-  const bp = values.budget_plan.trim()
+  const normalized = normalizeClientRequestedValues(values)
+
+  if (normalized.requested_by_type === 'client') {
+    return {
+      site: Number(normalized.site),
+      requested_by_type: 'client',
+      required_by_date: normalized.required_by_date || null,
+      reason: normalized.reason,
+      mrf_type: normalized.mrf_type,
+      billing_type: 'billable',
+      client_visible: true,
+    }
+  }
+
+  const bp = normalized.budget_plan.trim()
   return {
-    site: Number(values.site),
-    requested_by_type: values.requested_by_type,
-    mrf_type: values.mrf_type,
-    billing_type: values.billing_type,
-    requesting_department: values.requesting_department.trim() ? Number(values.requesting_department) : null,
-    required_department: values.required_department.trim() ? Number(values.required_department) : null,
-    department: values.department.trim() || undefined,
-    required_by_date: values.required_by_date || null,
-    reason: values.reason,
-    client_visible: values.client_visible,
+    site: Number(normalized.site),
+    requested_by_type: normalized.requested_by_type,
+    required_by_date: normalized.required_by_date || null,
+    reason: normalized.reason,
     budget_plan: bp ? Number(bp) : null,
-    ...clientFieldsToWritePayload(values, mode),
+    mrf_type: normalized.mrf_type,
+    billing_type: normalized.billing_type,
+    requesting_department: normalized.requesting_department.trim()
+      ? Number(normalized.requesting_department)
+      : null,
+    required_department: normalized.required_department.trim()
+      ? Number(normalized.required_department)
+      : null,
+    department: normalized.department.trim() || undefined,
+    client_visible: normalized.client_visible,
+    ...clientFieldsToWritePayload(normalized, mode),
   }
 }

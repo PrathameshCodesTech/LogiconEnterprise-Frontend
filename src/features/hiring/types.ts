@@ -61,6 +61,7 @@ export interface HiringApplicationRow {
   current_stage_name?: string | null
   current_stage_code?: string | null
   status: string
+  interview_plan?: number | null
   match_score?: string | number | null
   shortlisted_by?: number | null
   shortlisted_at?: string | null
@@ -246,6 +247,136 @@ export interface HiringDeploymentConversionResult {
   deployment: unknown
   created_employee: boolean
   created_deployment: boolean
+}
+
+/** GET /api/hiring/interviews/ */
+export interface InterviewRow {
+  id: number
+  hiring_application: number
+  planned_round?: number | null
+  round_type: 'hr' | 'technical' | 'manager' | 'client' | 'final'
+  round_number: number
+  scheduled_at?: string | null
+  scheduled_by?: number | null
+  interviewer?: number | null
+  interviewer_username?: string | null
+  status: 'pending' | 'scheduled' | 'completed' | 'cancelled' | 'no_show' | 'rescheduled'
+  mode: 'phone' | 'video' | 'in_person'
+  location?: string
+  meeting_link?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface InterviewCreateInput {
+  hiring_application: number
+  planned_round?: number | null
+  round_type: InterviewRow['round_type']
+  round_number?: number
+  scheduled_at?: string | null
+  interviewer?: number | null
+  status?: InterviewRow['status']
+  mode?: InterviewRow['mode']
+  location?: string
+  meeting_link?: string
+}
+
+export interface InterviewUpdateInput {
+  planned_round?: number | null
+  scheduled_at?: string | null
+  interviewer?: number | null
+  status?: InterviewRow['status']
+  mode?: InterviewRow['mode']
+  location?: string
+  meeting_link?: string
+}
+
+/** GET /api/hiring/interview-plans/ (rounds nested) */
+export interface InterviewPlanRoundRow {
+  id: number
+  plan: number
+  round_type: 'hr' | 'technical' | 'manager' | 'client' | 'final'
+  round_number: number
+  mode: 'phone' | 'video' | 'in_person'
+  is_required: boolean
+  is_active: boolean
+  instructions?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface InterviewPlanRow {
+  id: number
+  org: number
+  job_role?: number | null
+  job_role_name?: string | null
+  name: string
+  code: string
+  description?: string
+  is_default: boolean
+  is_active: boolean
+  rounds: InterviewPlanRoundRow[]
+  created_at?: string
+  updated_at?: string
+}
+
+/** POST /api/hiring/applications/{id}/apply-interview-plan/ */
+export interface ApplyInterviewPlanResult {
+  application: HiringApplicationRow
+  plan: InterviewPlanRow
+  interviews: InterviewRow[]
+  created_count: number
+  attached_count: number
+}
+
+/** GET /api/hiring/applications/interview-pipeline/ */
+export interface InterviewPipelineBucketItem {
+  application: HiringApplicationRow
+  interviews: InterviewRow[]
+  feedbacks: InterviewFeedbackRow[]
+  required_round_ids: number[]
+  passed_round_ids: number[]
+}
+
+export type InterviewPipelineBucketKey =
+  | 'ready_for_screening'
+  | 'hr'
+  | 'technical'
+  | 'manager'
+  | 'client'
+  | 'final'
+  | 'feedback_pending'
+  | 'on_hold'
+  | 'cleared_for_offer'
+
+export interface InterviewPipelineBucket {
+  key: InterviewPipelineBucketKey
+  count: number
+  applications: InterviewPipelineBucketItem[]
+}
+
+export interface InterviewPipelineResponse {
+  buckets: InterviewPipelineBucket[]
+}
+
+/** GET /api/hiring/interview-feedbacks/ */
+export interface InterviewFeedbackRow {
+  id: number
+  interview: number
+  given_by?: number | null
+  given_by_username?: string | null
+  rating?: number | null
+  feedback?: string
+  recommendation: 'proceed' | 'hold' | 'reject'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface InterviewFeedbackCreateInput {
+  interview: number
+  rating?: number | null
+  feedback?: string
+  recommendation: InterviewFeedbackRow['recommendation']
 }
 
 export interface CandidateMatchResultRow {

@@ -74,16 +74,16 @@ export function HiringDemandsPage() {
   return (
     <div className="w-full space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-app-text">Hiring demands</h2>
+        <h2 className="text-lg font-semibold text-app-text">Open hiring demands</h2>
         <p className="text-sm text-app-secondary">
-          Approved staffing needs from MRF line items. Find an existing candidate or add a new one to start an application.
+          Approved manpower requests ready for hiring.
         </p>
       </div>
 
       {error ? <ErrorState message={error} /> : null}
       {loading ? <Spinner label="Loading hiring demands..." /> : null}
       {!loading && !error && rows.length === 0 ? (
-        <EmptyState title="No hiring demands" description="Approved MRF line items will appear here." />
+        <EmptyState title="No open demands" description="Approved manpower requests will appear here once they are ready for hiring." />
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
@@ -91,13 +91,11 @@ export function HiringDemandsPage() {
           <Table>
             <THead>
               <TR>
-                <TH className="py-2">MRF</TH>
                 <TH className="py-2">Client / site</TH>
                 <TH className="py-2">Job role</TH>
                 <TH className="py-2">Requested</TH>
-                <TH className="py-2">Applications</TH>
                 <TH className="py-2">Shortlisted</TH>
-                <TH className="py-2">Selected</TH>
+                <TH className="py-2">Client approved</TH>
                 <TH className="py-2">Offer accepted</TH>
                 <TH className="py-2">Open</TH>
                 <TH className="py-2 text-right"> </TH>
@@ -106,14 +104,13 @@ export function HiringDemandsPage() {
             <TBody>
               {rows.map((d) => (
                 <TR key={d.id}>
-                  <TD className="py-2 font-mono text-xs">#{d.mrf_id}</TD>
-                  <TD className="py-2 text-xs text-app-secondary">
-                    {d.client_name?.trim() || '-'}
-                    {d.site_name ? ` | ${d.site_name}` : null}
+                  <TD className="py-2">
+                    <p className="text-sm font-medium text-app-text">{d.client_name?.trim() || 'Client'}</p>
+                    <p className="text-xs text-app-secondary">{d.site_name?.trim() || '—'}</p>
+                    <p className="font-mono text-[11px] text-app-subtle">Request #{d.mrf_id}</p>
                   </TD>
                   <TD className="py-2 text-sm">{d.job_role_name ?? `Role #${d.job_role_id}`}</TD>
                   <TD className="py-2 text-xs">{d.requested_headcount}</TD>
-                  <TD className="py-2 text-xs">{d.application_count}</TD>
                   <TD className="py-2 text-xs">{d.shortlisted_count}</TD>
                   <TD className="py-2 text-xs">{d.selected_count}</TD>
                   <TD className="py-2 text-xs">{d.offer_accepted_count}</TD>
@@ -122,15 +119,15 @@ export function HiringDemandsPage() {
                     <div className="flex flex-wrap justify-end gap-2">
                       <Link
                         to={`/hiring/demands/${d.id}`}
-                        className="inline-flex items-center gap-1 min-h-8 rounded-panel border border-app-border bg-app-surface px-2 text-xs text-app-text shadow-panel hover:border-brand-500/40 transition-colors"
+                        className="inline-flex items-center gap-1 min-h-8 rounded-panel bg-brand-600 px-3 text-xs font-medium text-white shadow-panel transition-colors hover:bg-brand-700"
                       >
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                        Details
+                        <Search className="h-3.5 w-3.5" aria-hidden />
+                        Find candidates
                       </Link>
                       {canFindFromPool ? (
                         <Button type="button" variant="secondary" className="min-h-8 gap-1 px-2 text-xs" onClick={() => openPool(d)}>
-                          <Search className="h-3.5 w-3.5" aria-hidden />
-                          Find from pool
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                          Quick match from pool
                         </Button>
                       ) : null}
                       {canAddNewCandidate ? (

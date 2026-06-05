@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Briefcase } from 'lucide-react'
 import { listOffers } from '@/api/hiring'
 import { parseApiError } from '@/lib/apiError'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -167,14 +169,34 @@ export function OffersPage() {
                     <TD className="py-2 text-xs text-app-secondary">{o.released_by_username ?? '—'}</TD>
                     <TD className="py-2 text-xs text-app-secondary">{fmtDate(o.released_at)}</TD>
                     <TD className="py-2 text-right">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="min-h-7 px-2 text-xs"
-                        onClick={() => openManage(o)}
-                      >
-                        Manage
-                      </Button>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {o.status === 'accepted' ? (
+                          <Link
+                            to={`/hiring/applications/${o.hiring_application}?openConvert=1`}
+                            className="inline-flex min-h-7 items-center gap-1 rounded-panel bg-brand-600 px-3 text-xs font-medium text-white transition-colors hover:bg-brand-700"
+                          >
+                            <Briefcase className="h-3 w-3" aria-hidden />
+                            Convert to deployment
+                          </Link>
+                        ) : null}
+                        {o.status === 'released' ? (
+                          <Badge variant="info" className="text-[11px]">Awaiting acceptance</Badge>
+                        ) : null}
+                        {o.status === 'draft' ? (
+                          <Badge variant="neutral" className="text-[11px]">Release offer</Badge>
+                        ) : null}
+                        {['declined', 'withdrawn', 'expired'].includes(o.status) ? (
+                          <Badge variant="neutral" className="text-[11px]">Closed</Badge>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="min-h-7 px-2 text-xs"
+                          onClick={() => openManage(o)}
+                        >
+                          Manage
+                        </Button>
+                      </div>
                     </TD>
                   </TR>
                 ))}

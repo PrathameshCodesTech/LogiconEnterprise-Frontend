@@ -120,6 +120,10 @@ export function ResumePoolDrawer({
 
   async function linkCandidate(candidate: CandidateRow) {
     if (!demand) return
+    if (!Number.isFinite(candidate.id)) {
+      setLinkError('Candidate id is missing from the pool result. Refresh the search and try again.')
+      return
+    }
     setLinkingId(candidate.id)
     setLinkError(null)
     setLinkedAppId(null)

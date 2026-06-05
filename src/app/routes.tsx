@@ -1,6 +1,7 @@
 ﻿import { createBrowserRouter, Navigate, useLocation, useParams } from 'react-router-dom'
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { RequireCapability } from '@/features/auth/RequireCapability'
+import { RequireInternal } from '@/features/auth/RequireInternal'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { SetPasswordPage } from '@/features/auth/SetPasswordPage'
 import { AppShell } from '@/components/layout/AppShell'
@@ -28,6 +29,7 @@ import { MobilisationDetailPage } from '@/features/mobilisation/MobilisationDeta
 import { ApprovalSetupPage } from '@/features/approvalSetup/ApprovalSetupPage'
 import { MastersPage } from '@/features/masters/MastersPage'
 import { BudgetPlansPage } from '@/features/budgets/BudgetPlansPage'
+import { ClientBudgetCommercialsPage } from '@/features/budgets/ClientBudgetCommercialsPage'
 import { CandidatesListPage } from '@/features/talent/CandidatesListPage'
 import { CandidateDetailPage } from '@/features/talent/CandidateDetailPage'
 import { ResumeReviewPage } from '@/features/talent/ResumeReviewPage'
@@ -35,10 +37,11 @@ import { HiringDemandsPage } from '@/features/hiring/HiringDemandsPage'
 import { HiringDemandDetailPage } from '@/features/hiring/HiringDemandDetailPage'
 import { HiringApplicationsListPage } from '@/features/hiring/HiringApplicationsListPage'
 import { HiringApplicationDetailPage } from '@/features/hiring/HiringApplicationDetailPage'
-import { HiringPipelinePage } from '@/features/hiring/HiringPipelinePage'
+import { InterviewPipelinePage } from '@/features/hiring/InterviewPipelinePage'
 import { ClientReviewPage } from '@/features/hiring/ClientReviewPage'
 import { OffersPage } from '@/features/hiring/OffersPage'
 import { EmployeesPage } from '@/features/deployment/EmployeesPage'
+import { ClientEmployeesPage } from '@/features/deployment/ClientEmployeesPage'
 import { SiteDeploymentsPage } from '@/features/deployment/SiteDeploymentsPage'
 import { DeploymentHistoryPage } from '@/features/deployment/DeploymentHistoryPage'
 import { SalesDashboardPage } from '@/features/sales/SalesDashboardPage'
@@ -169,6 +172,14 @@ export const router = createBrowserRouter([
             element: (
               <RequireCapability anyOf={[CAP.BUDGET_READ]}>
                 <BudgetPlansPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'budgets/:id',
+            element: (
+              <RequireCapability anyOf={[CAP.BUDGET_READ]}>
+                <ClientBudgetCommercialsPage />
               </RequireCapability>
             ),
           },
@@ -359,70 +370,102 @@ export const router = createBrowserRouter([
           {
             path: 'hiring/pipeline',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <HiringPipelinePage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <InterviewPipelinePage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring/demands',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <HiringDemandsPage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <HiringDemandsPage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring/demands/:id',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <HiringDemandDetailPage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <HiringDemandDetailPage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring/applications',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <HiringApplicationsListPage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <HiringApplicationsListPage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring/applications/:id',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <HiringApplicationDetailPage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <HiringApplicationDetailPage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring',
             element: (
-              <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
-                <Navigate to="/hiring/applications" replace />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.HIRING_APPLICATION_READ]}>
+                  <Navigate to="/hiring/applications" replace />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
             path: 'hiring-pipeline',
-            element: <Navigate to="/hiring/pipeline" replace />,
+            element: (
+              <RequireInternal>
+                <Navigate to="/hiring/pipeline" replace />
+              </RequireInternal>
+            ),
           },
           {
             path: 'hiring-demands',
-            element: <Navigate to="/hiring/demands" replace />,
+            element: (
+              <RequireInternal>
+                <Navigate to="/hiring/demands" replace />
+              </RequireInternal>
+            ),
           },
           {
             path: 'hiring-demands/:id',
-            element: <HiringDemandLegacyRedirect />,
+            element: (
+              <RequireInternal>
+                <HiringDemandLegacyRedirect />
+              </RequireInternal>
+            ),
           },
           {
             path: 'hiring-applications',
-            element: <Navigate to="/hiring/applications" replace />,
+            element: (
+              <RequireInternal>
+                <Navigate to="/hiring/applications" replace />
+              </RequireInternal>
+            ),
           },
           {
             path: 'hiring-applications/:id',
-            element: <HiringApplicationLegacyRedirect />,
+            element: (
+              <RequireInternal>
+                <HiringApplicationLegacyRedirect />
+              </RequireInternal>
+            ),
           },
           {
             path: 'talent/resume-review',
@@ -443,9 +486,11 @@ export const router = createBrowserRouter([
           {
             path: 'hiring/offers',
             element: (
-              <RequireCapability anyOf={[CAP.OFFER_READ, CAP.OFFER_CREATE, CAP.OFFER_UPDATE, CAP.OFFER_APPROVE, CAP.OFFER_MANAGE]}>
-                <OffersPage />
-              </RequireCapability>
+              <RequireInternal>
+                <RequireCapability anyOf={[CAP.OFFER_READ, CAP.OFFER_CREATE, CAP.OFFER_UPDATE, CAP.OFFER_APPROVE, CAP.OFFER_MANAGE]}>
+                  <OffersPage />
+                </RequireCapability>
+              </RequireInternal>
             ),
           },
           {
@@ -461,6 +506,14 @@ export const router = createBrowserRouter([
             element: (
               <RequireCapability anyOf={[CAP.EMPLOYEE_READ]}>
                 <EmployeesPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'deployment/client-employees',
+            element: (
+              <RequireCapability anyOf={[CAP.EMPLOYEE_READ]}>
+                <ClientEmployeesPage />
               </RequireCapability>
             ),
           },

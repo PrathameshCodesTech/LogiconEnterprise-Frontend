@@ -285,7 +285,7 @@ export interface MobilisationSalesContext {
   readiness: MobilisationSalesContextReadiness
 }
 
-// ─── Setup Builder Types ────────────────────────────────────────────────────
+// ─── Legacy mobilisation setup API types (compatibility) ────────────────────
 
 export type MobilisationSetupStrategy = 'simple' | 'role_grouped' | 'custom'
 

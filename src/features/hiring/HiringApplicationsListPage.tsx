@@ -37,6 +37,15 @@ function decisionVariant(s: string | null | undefined): 'success' | 'danger' | '
   return 'neutral'
 }
 
+function nextStepHint(
+  status: string,
+): { label: string; variant: 'info' | 'success' | 'warning' | 'neutral' } | null {
+  if (status === 'client_review') return { label: 'Awaiting client', variant: 'warning' }
+  if (status === 'offer_released') return { label: 'Awaiting offer acceptance', variant: 'info' }
+  if (status === 'deployed') return { label: 'Deployed', variant: 'success' }
+  return null
+}
+
 export function HiringApplicationsListPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -218,6 +227,7 @@ export function HiringApplicationsListPage() {
                   const sent = sendSuccess[a.id] ?? false
                   const rowErr = sendErrors[a.id] ?? ''
                   const canSend = canSendToClient && !a.client_visible && a.status !== 'rejected' && a.status !== 'cancelled'
+                  const hint = nextStepHint(a.status)
                   return (
                     <TR key={a.id}>
                       <TD className="py-2">
@@ -261,6 +271,17 @@ export function HiringApplicationsListPage() {
                               </Button>
                             ) : null}
                             {sent ? <Badge variant="success" className="text-[11px]">Sent</Badge> : null}
+                            {a.status === 'selected' ? (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="min-h-7 gap-1 px-2 text-xs"
+                                onClick={() => navigate(`/hiring/applications/${a.id}`)}
+                              >
+                                <Briefcase className="h-3 w-3" aria-hidden />
+                                Create offer
+                              </Button>
+                            ) : null}
                             {a.status === 'offer_accepted' ? (
                               <Button
                                 type="button"
@@ -272,6 +293,7 @@ export function HiringApplicationsListPage() {
                                 Convert
                               </Button>
                             ) : null}
+                            {hint ? <Badge variant={hint.variant} className="text-[11px]">{hint.label}</Badge> : null}
                             <Button
                               type="button"
                               variant="secondary"

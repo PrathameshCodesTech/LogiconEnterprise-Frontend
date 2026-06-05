@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
+import { ArrowLeft, GitBranch, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import {
@@ -20,6 +20,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { hiringApplicationStatusLabel } from '@/features/talent/talentLabels'
+import { HiringDemandJourney } from '@/features/hiring/HiringJourney'
 import type {
   CandidatePoolResultRow,
   HiringApplicationRow,
@@ -159,6 +160,7 @@ function CandidatePoolTab({
   const [shortlistingId, setShortlistingId] = useState<number | null>(null)
   const [shortlistErrors, setShortlistErrors] = useState<Record<number, string>>({})
   const [shortlistSuccess, setShortlistSuccess] = useState<Record<number, boolean>>({})
+  const [justShortlisted, setJustShortlisted] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -196,6 +198,7 @@ function CandidatePoolTab({
     try {
       await shortlistCandidateForDemand(demandId, { candidate: cid })
       setShortlistSuccess((prev) => ({ ...prev, [cid]: true }))
+      setJustShortlisted(true)
       onShortlisted()
       void load()
     } catch (e: unknown) {
@@ -240,6 +243,12 @@ function CandidatePoolTab({
           </Button>
         </div>
       </div>
+
+      {justShortlisted ? (
+        <div className="rounded-panel border border-status-success/30 bg-status-success/5 px-3 py-2">
+          <InlineSuccess message="Candidate shortlisted. Send shortlisted candidates to client review from Applications." />
+        </div>
+      ) : null}
 
       {error ? <ErrorState message={error} /> : null}
       {loading && rows.length === 0 ? <Spinner label="Loading ranked candidates…" /> : null}
@@ -365,19 +374,44 @@ function FilterField({
 
 // ─── ApplicationsTab ──────────────────────────────────────────────────────────
 
+type AppGroupKey = 'shortlisted' | 'sent' | 'approved' | 'offer' | 'closed'
+
+const APP_GROUPS: { key: AppGroupKey; label: string; description: string }[] = [
+  { key: 'shortlisted', label: 'Shortlisted', description: 'Ready to send to the client for review.' },
+  { key: 'sent', label: 'Sent to client', description: 'Awaiting the client decision.' },
+  { key: 'approved', label: 'Client approved', description: 'Ready for offer.' },
+  { key: 'offer', label: 'Offer stage', description: 'Offer in progress or accepted.' },
+  { key: 'closed', label: 'Deployed / closed', description: 'Deployed, rejected or cancelled.' },
+]
+
+function categorizeApp(app: HiringApplicationRow): AppGroupKey {
+  if (app.status === 'deployed' || app.status === 'rejected' || app.status === 'cancelled') return 'closed'
+  if (
+    app.status === 'offer_released' ||
+    app.status === 'offer_accepted' ||
+    app.status === 'offer_declined' ||
+    (app.offer_status != null && app.offer_status !== '' && app.offer_status !== 'draft')
+  )
+    return 'offer'
+  if (app.client_decision === 'approved' || app.status === 'selected') return 'approved'
+  if (app.client_visible || app.status === 'client_review') return 'sent'
+  return 'shortlisted'
+}
+
 function ApplicationsTab({
   demand,
   canSendToClient,
+  onChanged,
 }: {
   demand: HiringDemandRow
   canSendToClient: boolean
+  onChanged: () => void
 }) {
   const navigate = useNavigate()
   const [rows, setRows] = useState<HiringApplicationRow[]>([])
   const [count, setCount] = useState<number | undefined>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState('')
   const [sendingId, setSendingId] = useState<number | null>(null)
   const [sendErrors, setSendErrors] = useState<Record<number, string>>({})
   const [sendSuccess, setSendSuccess] = useState<Record<number, boolean>>({})
@@ -392,7 +426,6 @@ function ApplicationsTab({
       const res = await listHiringApplications({
         site: demand.site_id ?? undefined,
         job_role: demand.job_role_id,
-        status: statusFilter || undefined,
       })
       setRows(res.items)
       setCount(res.count)
@@ -401,7 +434,7 @@ function ApplicationsTab({
     } finally {
       setLoading(false)
     }
-  }, [demand.site_id, demand.job_role_id, statusFilter])
+  }, [demand.site_id, demand.job_role_id])
 
   useEffect(() => {
     void load()
@@ -414,7 +447,8 @@ function ApplicationsTab({
     try {
       await sendApplicationToClientReview(appId, {})
       setSendSuccess((prev) => ({ ...prev, [appId]: true }))
-      void load()
+      await load()
+      onChanged()
     } catch (e: unknown) {
       setSendErrors((prev) => ({
         ...prev,
@@ -432,7 +466,8 @@ function ApplicationsTab({
     try {
       const res = await sendShortlistedToClientReview(demand.id, {})
       setBulkResult({ sent: res.sent, skipped: res.skipped })
-      void load()
+      await load()
+      onChanged()
     } catch (e: unknown) {
       setBulkError(parseApiError(e, 'Bulk send failed').message)
     } finally {
@@ -440,30 +475,19 @@ function ApplicationsTab({
     }
   }
 
-  const STATUS_OPTS = [
-    { value: '', label: 'Any status' },
-    { value: 'shortlisted', label: 'Shortlisted' },
-    { value: 'client_review', label: 'Client review' },
-    { value: 'selected', label: 'Selected' },
-    { value: 'rejected', label: 'Rejected' },
-    { value: 'offer_released', label: 'Offer released' },
-    { value: 'offer_accepted', label: 'Offer accepted' },
-    { value: 'offer_declined', label: 'Offer declined' },
-    { value: 'deployed', label: 'Deployed' },
-  ]
+  const grouped = APP_GROUPS.map((g) => ({
+    ...g,
+    items: rows.filter((r) => categorizeApp(r) === g.key),
+  })).filter((g) => g.items.length > 0)
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded border border-app-border bg-app-surface px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
-        >
-          {STATUS_OPTS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        <p className="text-xs text-app-secondary">
+          {demand.client_name?.trim() || 'Client'}
+          {demand.site_name ? ` · ${demand.site_name}` : ''}
+          {demand.job_role_name ? ` · ${demand.job_role_name}` : ''}
+        </p>
         <Button
           type="button"
           variant="secondary"
@@ -490,7 +514,7 @@ function ApplicationsTab({
 
       {bulkResult ? (
         <InlineSuccess
-          message={`Sent: ${bulkResult.sent}, already sent / skipped: ${bulkResult.skipped}`}
+          message={`Sent ${bulkResult.sent} to client review. ${bulkResult.skipped} already sent or skipped.`}
         />
       ) : null}
       {bulkError ? <p className="text-xs text-status-danger">{bulkError}</p> : null}
@@ -504,93 +528,115 @@ function ApplicationsTab({
         />
       ) : null}
 
-      {rows.length > 0 ? (
-        <div className="overflow-x-auto rounded-panel border border-app-border bg-app-surface shadow-panel">
-          <Table>
-            <THead>
-              <TR>
-                <TH className="py-2">Candidate</TH>
-                <TH className="py-2">Stage</TH>
-                <TH className="py-2">Status</TH>
-                <TH className="py-2">Client</TH>
-                <TH className="py-2">Decision</TH>
-                <TH className="py-2">Offer</TH>
-                <TH className="py-2 text-right"> </TH>
-              </TR>
-            </THead>
-            <TBody>
-              {rows.map((app) => {
-                const busy = sendingId === app.id
-                const sent = sendSuccess[app.id] ?? false
-                const appErr = sendErrors[app.id] ?? ''
-                const canSend = canSendToClient && !app.client_visible && app.status !== 'rejected' && app.status !== 'cancelled'
-                return (
-                  <TR key={app.id}>
-                    <TD className="py-2">
-                      <p className="text-sm font-medium">{app.candidate_name ?? `Candidate #${app.candidate}`}</p>
-                      {app.candidate_phone ? <p className="font-mono text-xs text-app-secondary">{app.candidate_phone}</p> : null}
-                    </TD>
-                    <TD className="py-2 text-xs">{app.current_stage_name ?? '—'}</TD>
-                    <TD className="py-2">
-                      <Badge variant="neutral" className="text-[11px]">
-                        {hiringApplicationStatusLabel(app.status)}
-                      </Badge>
-                    </TD>
-                    <TD className="py-2 text-xs">
-                      {app.client_visible ? (
-                        <Badge variant="info" className="text-[11px]">Visible</Badge>
-                      ) : (
-                        <span className="text-app-subtle">—</span>
-                      )}
-                    </TD>
-                    <TD className="py-2">
-                      {app.client_decision ? (
-                        <Badge variant={decisionVariant(app.client_decision)} className="text-[11px]">
-                          {app.client_decision}
+      {!loading && grouped.map((group) => (
+        <section key={group.key} className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-sm font-semibold text-app-text">{group.label}</h3>
+            <Badge variant="neutral" className="text-[11px]">{group.items.length}</Badge>
+            <span className="text-xs text-app-subtle">{group.description}</span>
+          </div>
+          {group.key === 'approved' ? (
+            <p className="text-xs text-app-secondary">Client approved candidates continue in Hiring Pipeline.</p>
+          ) : null}
+          <div className="overflow-x-auto rounded-panel border border-app-border bg-app-surface shadow-panel">
+            <Table>
+              <THead>
+                <TR>
+                  <TH className="py-2">Candidate</TH>
+                  <TH className="py-2">Status</TH>
+                  <TH className="py-2">Client decision</TH>
+                  <TH className="py-2">Offer</TH>
+                  <TH className="py-2">Next step</TH>
+                  <TH className="py-2 text-right"> </TH>
+                </TR>
+              </THead>
+              <TBody>
+                {group.items.map((app) => {
+                  const busy = sendingId === app.id
+                  const sent = sendSuccess[app.id] ?? false
+                  const appErr = sendErrors[app.id] ?? ''
+                  const canSend =
+                    canSendToClient && !app.client_visible && app.status !== 'rejected' && app.status !== 'cancelled'
+                  const readyForOffer = group.key === 'approved'
+                  const readyForDeployment =
+                    app.offer_status === 'accepted' || app.status === 'offer_accepted'
+                  return (
+                    <TR key={app.id}>
+                      <TD className="py-2">
+                        <p className="text-sm font-medium">{app.candidate_name ?? `Candidate #${app.candidate}`}</p>
+                        {app.candidate_phone ? <p className="font-mono text-xs text-app-secondary">{app.candidate_phone}</p> : null}
+                      </TD>
+                      <TD className="py-2">
+                        <Badge variant="neutral" className="text-[11px]">
+                          {hiringApplicationStatusLabel(app.status)}
                         </Badge>
-                      ) : <span className="text-xs text-app-subtle">—</span>}
-                    </TD>
-                    <TD className="py-2 text-xs">
-                      {app.offer_status ? (
-                        <Badge variant="neutral" className="text-[11px]">{app.offer_status}</Badge>
-                      ) : <span className="text-app-subtle">—</span>}
-                    </TD>
-                    <TD className="py-2 text-right">
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="flex gap-1">
-                          {canSend && !sent ? (
+                      </TD>
+                      <TD className="py-2">
+                        {app.client_decision ? (
+                          <Badge variant={decisionVariant(app.client_decision)} className="text-[11px]">
+                            {app.client_decision}
+                          </Badge>
+                        ) : <span className="text-xs text-app-subtle">—</span>}
+                      </TD>
+                      <TD className="py-2 text-xs">
+                        {app.offer_status ? (
+                          <Badge variant="neutral" className="text-[11px]">{app.offer_status}</Badge>
+                        ) : <span className="text-app-subtle">—</span>}
+                      </TD>
+                      <TD className="py-2 text-xs">
+                        {readyForDeployment ? (
+                          <span className="font-medium text-status-hired">Ready for deployment</span>
+                        ) : readyForOffer ? (
+                          <span className="font-medium text-brand-700">Ready for offer</span>
+                        ) : (
+                          <span className="text-app-subtle">—</span>
+                        )}
+                      </TD>
+                      <TD className="py-2 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex gap-1">
+                            {canSend && !sent ? (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="min-h-7 gap-1 px-2 text-xs"
+                                disabled={busy || sendingId != null}
+                                onClick={() => void handleSendToClient(app.id)}
+                              >
+                                <SendHorizontal className="h-3 w-3" aria-hidden />
+                                {busy ? 'Sending…' : 'Send to client'}
+                              </Button>
+                            ) : null}
+                            {sent ? <Badge variant="success" className="text-[11px]">Sent</Badge> : null}
+                            <Link
+                              to={`/hiring/pipeline?application=${app.id}`}
+                              className="inline-flex min-h-7 items-center gap-1 rounded-panel border border-app-border bg-app-surface px-2 text-xs text-app-text shadow-panel transition-colors hover:border-brand-500/40"
+                            >
+                              <GitBranch className="h-3 w-3" aria-hidden />
+                              Open in interview pipeline
+                            </Link>
                             <Button
                               type="button"
                               variant="secondary"
-                              className="min-h-7 gap-1 px-2 text-xs"
-                              disabled={busy || sendingId != null}
-                              onClick={() => void handleSendToClient(app.id)}
+                              className="min-h-7 px-2 text-xs"
+                              onClick={() => navigate(`/hiring/applications/${app.id}`)}
                             >
-                              <SendHorizontal className="h-3 w-3" aria-hidden />
-                              {busy ? 'Sending…' : 'Send to client'}
+                              Open application
                             </Button>
-                          ) : null}
-                          {sent ? <Badge variant="success" className="text-[11px]">Sent</Badge> : null}
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="min-h-7 px-2 text-xs"
-                            onClick={() => navigate(`/hiring/applications/${app.id}`)}
-                          >
-                            Open
-                          </Button>
+                          </div>
+                          {appErr ? <InlineError message={appErr} /> : null}
                         </div>
-                        {appErr ? <InlineError message={appErr} /> : null}
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-          {count != null ? <p className="px-3 py-2 text-xs text-app-subtle">Total: {count}</p> : null}
-        </div>
-      ) : null}
+                      </TD>
+                    </TR>
+                  )
+                })}
+              </TBody>
+            </Table>
+          </div>
+        </section>
+      ))}
+
+      {count != null && rows.length > 0 ? <p className="text-xs text-app-subtle">Total: {count}</p> : null}
     </div>
   )
 }
@@ -609,7 +655,16 @@ export function HiringDemandDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'pool' | 'apps'>('pool')
-  const [poolRefreshKey, setPoolRefreshKey] = useState(0)
+
+  const refreshDemand = useCallback(async () => {
+    if (!Number.isFinite(demandId)) return
+    try {
+      const d = await getHiringDemand(demandId)
+      setDemand(d)
+    } catch {
+      /* keep existing demand on refresh failure */
+    }
+  }, [demandId])
 
   useEffect(() => {
     if (!Number.isFinite(demandId)) return
@@ -656,6 +711,8 @@ export function HiringDemandDetailPage() {
 
       <DemandSummary demand={demand} />
 
+      <HiringDemandJourney demand={demand} />
+
       <div className="flex gap-0 border-b border-app-border">
         {TABS.map((t) => (
           <button
@@ -676,18 +733,19 @@ export function HiringDemandDetailPage() {
 
       {tab === 'pool' ? (
         <CandidatePoolTab
-          key={poolRefreshKey}
           demandId={demandId}
           canShortlist={canShortlist}
           onShortlisted={() => {
-            setTab('apps')
-            setPoolRefreshKey((k) => k + 1)
+            void refreshDemand()
           }}
         />
       ) : (
         <ApplicationsTab
           demand={demand}
           canSendToClient={canSendToClient}
+          onChanged={() => {
+            void refreshDemand()
+          }}
         />
       )}
     </div>

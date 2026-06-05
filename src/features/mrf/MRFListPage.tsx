@@ -6,6 +6,7 @@ import { departmentToFormOption, listDepartments, type DepartmentOption, type De
 import { listClients, type ClientRow } from '@/api/clients'
 import { listSites, type SiteProfileRow } from '@/api/sites'
 import { useAuthStore } from '@/features/auth/authStore'
+import { isClientFacingUser } from '@/lib/userRoleMode'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
@@ -57,7 +58,9 @@ async function loadAllActiveDepartmentOptions(): Promise<DepartmentOption[]> {
 }
 
 export function MRFListPage() {
-  const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
+  const me = useAuthStore((s) => s.me)
+  const meCaps = me?.capabilities ?? []
+  const isClient = isClientFacingUser(me)
   const canCreate = hasAnyCapability(meCaps, [CAP.MRF_CREATE])
   const canUpdate = hasAnyCapability(meCaps, [CAP.MRF_UPDATE])
   const canDelete = hasAnyCapability(meCaps, [CAP.MRF_DELETE])
@@ -165,6 +168,12 @@ export function MRFListPage() {
       setLookupsLoading(false)
     }
 
+    if (isClient) {
+      setDepartmentOptions([])
+      setDepartmentsLoading(false)
+      return
+    }
+
     try {
       const deptOpts = await loadAllActiveDepartmentOptions()
       setDepartmentOptions(deptOpts)
@@ -258,10 +267,12 @@ export function MRFListPage() {
               </div>
             </div>
             <p className="mt-3 text-xs text-app-secondary">{new Date(r.created_at).toLocaleString()}</p>
-            <p className="mt-2 text-xs text-app-subtle">
-              <span className="block truncate">Requesting: {formatMrfDeptSummary(r).requesting}</span>
-              <span className="block truncate">Required: {formatMrfDeptSummary(r).required}</span>
-            </p>
+            {!isClient ? (
+              <p className="mt-2 text-xs text-app-subtle">
+                <span className="block truncate">Requesting: {formatMrfDeptSummary(r).requesting}</span>
+                <span className="block truncate">Required: {formatMrfDeptSummary(r).required}</span>
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-app-secondary">
               Budget:{' '}
               {r.budget_plan != null && (r.budget_plan_name || r.budget_plan_code)
@@ -309,7 +320,7 @@ export function MRFListPage() {
               <input
                 value={search}
                 onChange={(e) => updateParam({ search: e.target.value })}
-                placeholder="Search department or reason"
+                placeholder={isClient ? 'Search reason' : 'Search department or reason'}
                 className="min-h-10 w-full rounded-panel border border-app-border bg-app-surface pl-10 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                 aria-label="Search MRFs"
               />
@@ -420,7 +431,7 @@ export function MRFListPage() {
                   <TH className="py-2">MRF</TH>
                   <TH className="py-2">Client</TH>
                   <TH className="py-2">Site</TH>
-                  <TH className="py-2">Departments</TH>
+                  {!isClient ? <TH className="py-2">Departments</TH> : null}
                   <TH className="py-2">Budget</TH>
                   <TH className="py-2">Status</TH>
                   <TH className="py-2">Requested by</TH>
@@ -444,14 +455,16 @@ export function MRFListPage() {
                       </TD>
                       <TD className="py-2 text-sm text-app-secondary">{c?.name ?? '-'}</TD>
                       <TD className="py-2 text-sm text-app-secondary">{s?.name ?? `Site #${r.site}`}</TD>
-                      <TD className="max-w-[200px] py-2 text-xs text-app-secondary">
-                        <div className="truncate" title={`Requesting: ${requesting}`}>
-                          Req: {requesting}
-                        </div>
-                        <div className="truncate" title={`Required: ${required}`}>
-                          Need: {required}
-                        </div>
-                      </TD>
+                      {!isClient ? (
+                        <TD className="max-w-[200px] py-2 text-xs text-app-secondary">
+                          <div className="truncate" title={`Requesting: ${requesting}`}>
+                            Req: {requesting}
+                          </div>
+                          <div className="truncate" title={`Required: ${required}`}>
+                            Need: {required}
+                          </div>
+                        </TD>
+                      ) : null}
                       <TD className="max-w-[140px] py-2 text-xs text-app-secondary">
                         {r.budget_plan != null && (r.budget_plan_name || r.budget_plan_code) ? (
                           <div className="truncate" title={r.budget_plan_name ?? ''}>

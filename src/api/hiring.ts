@@ -12,6 +12,14 @@ import type {
   HiringDeploymentConversionInput,
   HiringDeploymentConversionResult,
   HiringDemandRow,
+  ApplyInterviewPlanResult,
+  InterviewCreateInput,
+  InterviewFeedbackCreateInput,
+  InterviewFeedbackRow,
+  InterviewPlanRow,
+  InterviewPipelineResponse,
+  InterviewRow,
+  InterviewUpdateInput,
   MoveStageInput,
   OfferActionInput,
   OfferCreateInput,
@@ -39,6 +47,7 @@ export async function getHiringDemand(id: number): Promise<HiringDemandRow> {
 }
 
 export interface ListDemandCandidatePoolParams {
+  ranked?: 'true' | 'false'
   role?: string
   location?: string
   skill?: string
@@ -51,7 +60,9 @@ export async function listDemandCandidatePool(
   demandId: number,
   params?: ListDemandCandidatePoolParams,
 ): Promise<{ items: CandidateRow[]; count?: number }> {
-  const res = await api.get(`/api/hiring/demands/${demandId}/candidate-pool/`, { params })
+  const res = await api.get(`/api/hiring/demands/${demandId}/candidate-pool/`, {
+    params: { ranked: 'false', ...params },
+  })
   return unwrapDrfResults<CandidateRow>(res.data)
 }
 
@@ -245,6 +256,87 @@ export async function withdrawOffer(id: number, payload: OfferActionInput = {}):
 export async function expireOffer(id: number, payload: OfferActionInput = {}): Promise<OfferRow> {
   const res = await api.post(`/api/hiring/offers/${id}/expire/`, payload)
   return res.data as OfferRow
+}
+
+// Interviews
+
+export interface ListInterviewsParams {
+  hiring_application?: number
+  round_type?: string
+  status?: string
+  mode?: string
+  page?: number
+}
+
+export async function listInterviews(params?: ListInterviewsParams): Promise<{ items: InterviewRow[]; count?: number }> {
+  const res = await api.get('/api/hiring/interviews/', { params })
+  return unwrapDrfResults<InterviewRow>(res.data)
+}
+
+export async function createInterview(payload: InterviewCreateInput): Promise<InterviewRow> {
+  const res = await api.post('/api/hiring/interviews/', payload)
+  return res.data as InterviewRow
+}
+
+export async function updateInterview(id: number, payload: InterviewUpdateInput): Promise<InterviewRow> {
+  const res = await api.patch(`/api/hiring/interviews/${id}/`, payload)
+  return res.data as InterviewRow
+}
+
+export interface ListInterviewFeedbackParams {
+  interview?: number
+  recommendation?: string
+  given_by?: number
+  page?: number
+}
+
+export async function listInterviewFeedback(
+  params?: ListInterviewFeedbackParams,
+): Promise<{ items: InterviewFeedbackRow[]; count?: number }> {
+  const res = await api.get('/api/hiring/interview-feedbacks/', { params })
+  return unwrapDrfResults<InterviewFeedbackRow>(res.data)
+}
+
+export async function createInterviewFeedback(payload: InterviewFeedbackCreateInput): Promise<InterviewFeedbackRow> {
+  const res = await api.post('/api/hiring/interview-feedbacks/', payload)
+  return res.data as InterviewFeedbackRow
+}
+
+// Interview plans + pipeline
+
+export interface ListInterviewPlansParams {
+  job_role?: number
+  is_default?: boolean
+  is_active?: boolean
+  page?: number
+}
+
+export async function listInterviewPlans(
+  params?: ListInterviewPlansParams,
+): Promise<{ items: InterviewPlanRow[]; count?: number }> {
+  const res = await api.get('/api/hiring/interview-plans/', {
+    params: {
+      ...params,
+      is_default: typeof params?.is_default === 'boolean' ? String(params.is_default) : params?.is_default,
+      is_active: typeof params?.is_active === 'boolean' ? String(params.is_active) : params?.is_active,
+    },
+  })
+  return unwrapDrfResults<InterviewPlanRow>(res.data)
+}
+
+export async function getInterviewPlan(id: number): Promise<InterviewPlanRow> {
+  const res = await api.get(`/api/hiring/interview-plans/${id}/`)
+  return res.data as InterviewPlanRow
+}
+
+export async function applyInterviewPlan(applicationId: number, plan: number): Promise<ApplyInterviewPlanResult> {
+  const res = await api.post(`/api/hiring/applications/${applicationId}/apply-interview-plan/`, { plan })
+  return res.data as ApplyInterviewPlanResult
+}
+
+export async function getInterviewPipeline(): Promise<InterviewPipelineResponse> {
+  const res = await api.get('/api/hiring/applications/interview-pipeline/')
+  return res.data as InterviewPipelineResponse
 }
 
 // Client review

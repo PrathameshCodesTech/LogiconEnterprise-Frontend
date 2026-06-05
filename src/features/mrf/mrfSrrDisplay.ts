@@ -27,7 +27,8 @@ export function formatSrrOptionLabel(srr: SiteRoleRequirementRow, remainingHint?
   const role = srr.job_role_name ?? `Role #${srr.job_role}`
   const wagePart = srr.wage_category_name ? ` - ${srr.wage_category_name}` : ''
   const locPart = srr.location_area_name ? ` - ${srr.location_area_name}` : ''
-  const remaining = remainingHint != null ? remainingHint : srr.approved_headcount
+  const remaining =
+    remainingHint != null ? remainingHint : srr.remaining_headcount ?? srr.approved_headcount
   const headPart = `approved ${srr.approved_headcount} / remaining ${remaining}`
   const commercial = formatSrrCommercialSummary(srr)
   const base = `${role}${wagePart}${locPart} - ${headPart}`
@@ -41,7 +42,10 @@ export function availableHeadcountForEdit(row: MRFLineItemRow): number | null {
 }
 
 /** Summary for line item table SRR column. */
-export function formatLineItemSrrSummary(row: MRFLineItemRow): {
+export function formatLineItemSrrSummary(
+  row: MRFLineItemRow,
+  options?: { includeDepartment?: boolean },
+): {
   primary: string
   secondary: string | null
 } {
@@ -50,7 +54,9 @@ export function formatLineItemSrrSummary(row: MRFLineItemRow): {
   }
   const primary = row.site_role_requirement_label?.trim() || `SRR #${row.site_role_requirement}`
   const parts: string[] = []
-  if (row.srr_department_name) parts.push(row.srr_department_name)
+  if (options?.includeDepartment !== false && row.srr_department_name) {
+    parts.push(row.srr_department_name)
+  }
   if (row.srr_approved_headcount != null) {
     parts.push(`approved ${row.srr_approved_headcount}`)
   }

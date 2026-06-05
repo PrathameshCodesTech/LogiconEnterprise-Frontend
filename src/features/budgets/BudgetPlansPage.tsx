@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listBudgetPlans, createBudgetPlan, deleteBudgetPlan, updateBudgetPlan } from '@/api/budgets'
 import type { ClientRow } from '@/api/clients'
 import type { DepartmentRow } from '@/api/departments'
 import type { SiteProfileRow } from '@/api/sites'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
+import { isClientFacingUser } from '@/lib/userRoleMode'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -70,11 +71,14 @@ function PlanAmountBreakdown({ row }: { row: BudgetPlanRow }) {
 }
 
 export function BudgetPlansPage() {
-  const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
-  const canCreate = hasAnyCapability(meCaps, [CAP.BUDGET_CREATE])
-  const canUpdate = hasAnyCapability(meCaps, [CAP.BUDGET_UPDATE])
-  const canDelete = hasAnyCapability(meCaps, [CAP.BUDGET_DELETE])
+  const me = useAuthStore((s) => s.me)
+  const meCaps = me?.capabilities ?? []
+  const isClient = isClientFacingUser(me)
+  const canCreate = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_CREATE])
+  const canUpdate = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_UPDATE])
+  const canDelete = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_DELETE])
 
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const search = params.get('search') ?? ''
   const budget_nature = params.get('budget_nature') ?? ''
@@ -110,6 +114,10 @@ export function BudgetPlansPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [formFields, setFormFields] = useState<Record<string, string>>({})
   const formId = useMemo(() => `budget-form-${drawerMode}`, [drawerMode])
+
+  const [deactivateId, setDeactivateId] = useState<number | null>(null)
+  const [deactivateBusyId, setDeactivateBusyId] = useState<number | null>(null)
+  const [deactivateError, setDeactivateError] = useState<string | null>(null)
 
   function updateParam(next: Record<string, string | null>) {
     const p = new URLSearchParams(params)
@@ -173,6 +181,7 @@ export function BudgetPlansPage() {
   }, [refresh])
 
   useEffect(() => {
+    if (isClient) return
     let cancelled = false
     void (async () => {
       setClientsLoading(true)
@@ -190,9 +199,10 @@ export function BudgetPlansPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [isClient])
 
   useEffect(() => {
+    if (isClient) return
     let cancelled = false
     void (async () => {
       setDepartmentsLoading(true)
@@ -210,7 +220,7 @@ export function BudgetPlansPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [isClient])
 
   useEffect(() => {
     let cancelled = false
@@ -285,13 +295,21 @@ export function BudgetPlansPage() {
 
   async function handleDeactivate(row: BudgetPlanRow) {
     if (!canDelete || !row.is_active) return
-    const ok = window.confirm(`Deactivate budget "${row.name}"? It will be marked inactive.`)
-    if (!ok) return
+    if (deactivateId !== row.id) {
+      setDeactivateId(row.id)
+      setDeactivateError(null)
+      return
+    }
+    setDeactivateBusyId(row.id)
+    setDeactivateError(null)
     try {
       await deleteBudgetPlan(row.id)
+      setDeactivateId(null)
       await refresh()
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Deactivate failed').message)
+      setDeactivateError(parseApiError(e, 'Deactivate failed').message)
+    } finally {
+      setDeactivateBusyId(null)
     }
   }
 
@@ -323,14 +341,29 @@ export function BudgetPlansPage() {
             {r.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="neutral">Inactive</Badge>}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
+            {isClient ? (
+              <Button variant="secondary" className="min-h-9 px-3" type="button" onClick={() => navigate(`/budgets/${r.id}`)}>
+                View commercials
+              </Button>
+            ) : null}
             {canUpdate ? (
               <Button variant="secondary" className="min-h-9 px-3" type="button" onClick={() => openEdit(r)}>
                 Edit
               </Button>
             ) : null}
             {canDelete && r.is_active ? (
-              <Button variant="danger" className="min-h-9 px-3" type="button" onClick={() => void handleDeactivate(r)}>
-                Deactivate
+              <Button
+                variant="danger"
+                className="min-h-9 px-3"
+                type="button"
+                disabled={deactivateBusyId === r.id}
+                onClick={() => void handleDeactivate(r)}
+              >
+                {deactivateBusyId === r.id
+                  ? 'Deactivating...'
+                  : deactivateId === r.id
+                    ? 'Confirm deactivate'
+                    : 'Deactivate'}
               </Button>
             ) : null}
           </div>
@@ -343,8 +376,10 @@ export function BudgetPlansPage() {
     <div className="w-full space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-app-text">Budget plans</h2>
-          <p className="text-sm text-app-secondary">Allocations by client, site, or department.</p>
+          <h2 className="text-lg font-semibold text-app-text">Budgets</h2>
+          <p className="text-sm text-app-secondary">
+            {isClient ? 'Approved budgets and their commercial summary.' : 'Allocations by client, site, or department.'}
+          </p>
         </div>
         {canCreate ? (
           <Button onClick={openCreate} className="sm:self-start">
@@ -353,10 +388,12 @@ export function BudgetPlansPage() {
         ) : null}
       </div>
 
+      {deactivateError ? <ErrorState message={deactivateError} /> : null}
+
       <div className="space-y-3 rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
         <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Filters</p>
-        {clientsError ? <ErrorState message={`Client lookup failed. ${clientsError}`} /> : null}
-        {departmentsError ? <ErrorState message={`Department lookup failed. ${departmentsError}`} /> : null}
+        {!isClient && clientsError ? <ErrorState message={`Client lookup failed. ${clientsError}`} /> : null}
+        {!isClient && departmentsError ? <ErrorState message={`Department lookup failed. ${departmentsError}`} /> : null}
         {sitesFilterError ? <ErrorState message={`Site lookup failed. ${sitesFilterError}`} /> : null}
         <div className="relative max-w-xl">
           <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-app-subtle">
@@ -370,76 +407,80 @@ export function BudgetPlansPage() {
             aria-label="Search budgets"
           />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Select
-            id="bf-nature"
-            label="Nature"
-            value={budget_nature}
-            onChange={(e) => updateParam({ budget_nature: e.target.value || null })}
-          >
-            <option value="">All</option>
-            {BUDGET_NATURE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="bf-type"
-            label="Type"
-            value={budget_type}
-            onChange={(e) => updateParam({ budget_type: e.target.value || null })}
-          >
-            <option value="">All</option>
-            {BUDGET_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="bf-status"
-            label="Status"
-            value={statusFilter}
-            onChange={(e) => updateParam({ status: e.target.value || null })}
-          >
-            <option value="">All</option>
-            {BUDGET_STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="bf-active"
-            label="Active flag"
-            value={typeof is_active === 'boolean' ? String(is_active) : ''}
-            onChange={(e) => updateParam({ is_active: e.target.value || null })}
-          >
-            <option value="">All</option>
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
-          </Select>
-        </div>
+        {!isClient ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Select
+              id="bf-nature"
+              label="Nature"
+              value={budget_nature}
+              onChange={(e) => updateParam({ budget_nature: e.target.value || null })}
+            >
+              <option value="">All</option>
+              {BUDGET_NATURE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="bf-type"
+              label="Type"
+              value={budget_type}
+              onChange={(e) => updateParam({ budget_type: e.target.value || null })}
+            >
+              <option value="">All</option>
+              {BUDGET_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="bf-status"
+              label="Status"
+              value={statusFilter}
+              onChange={(e) => updateParam({ status: e.target.value || null })}
+            >
+              <option value="">All</option>
+              {BUDGET_STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="bf-active"
+              label="Active flag"
+              value={typeof is_active === 'boolean' ? String(is_active) : ''}
+              onChange={(e) => updateParam({ is_active: e.target.value || null })}
+            >
+              <option value="">All</option>
+              <option value="true">Active</option>
+              <option value="false">Inactive</option>
+            </Select>
+          </div>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Select
-            id="bf-client"
-            label="Client"
-            value={typeof clientFilter === 'number' ? String(clientFilter) : ''}
-            onChange={(e) =>
-              updateParam({
-                client: e.target.value || null,
-                site: null,
-              })
-            }
-          >
-            <option value="">All clients</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          {!isClient ? (
+            <Select
+              id="bf-client"
+              label="Client"
+              value={typeof clientFilter === 'number' ? String(clientFilter) : ''}
+              onChange={(e) =>
+                updateParam({
+                  client: e.target.value || null,
+                  site: null,
+                })
+              }
+            >
+              <option value="">All clients</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <Select
             id="bf-site"
             label="Site"
@@ -460,19 +501,21 @@ export function BudgetPlansPage() {
               </option>
             ))}
           </Select>
-          <Select
-            id="bf-dept"
-            label="Department"
-            value={typeof departmentFilter === 'number' ? String(departmentFilter) : ''}
-            onChange={(e) => updateParam({ department: e.target.value || null })}
-          >
-            <option value="">All departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} ({d.code})
-              </option>
-            ))}
-          </Select>
+          {!isClient ? (
+            <Select
+              id="bf-dept"
+              label="Department"
+              value={typeof departmentFilter === 'number' ? String(departmentFilter) : ''}
+              onChange={(e) => updateParam({ department: e.target.value || null })}
+            >
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.code})
+                </option>
+              ))}
+            </Select>
+          ) : null}
         </div>
       </div>
 
@@ -527,14 +570,29 @@ export function BudgetPlansPage() {
                     </TD>
                     <TD className="py-2 text-right align-top">
                       <div className="flex justify-end gap-2">
+                        {isClient ? (
+                          <Button variant="secondary" className="min-h-9 px-3" type="button" onClick={() => navigate(`/budgets/${r.id}`)}>
+                            View commercials
+                          </Button>
+                        ) : null}
                         {canUpdate ? (
                           <Button variant="secondary" className="min-h-9 px-3" type="button" onClick={() => openEdit(r)}>
                             Edit
                           </Button>
                         ) : null}
                         {canDelete && r.is_active ? (
-                          <Button variant="danger" className="min-h-9 px-3" type="button" onClick={() => void handleDeactivate(r)}>
-                            Deactivate
+                          <Button
+                            variant="danger"
+                            className="min-h-9 px-3"
+                            type="button"
+                            disabled={deactivateBusyId === r.id}
+                            onClick={() => void handleDeactivate(r)}
+                          >
+                            {deactivateBusyId === r.id
+                              ? 'Deactivating...'
+                              : deactivateId === r.id
+                                ? 'Confirm deactivate'
+                                : 'Deactivate'}
                           </Button>
                         ) : null}
                       </div>

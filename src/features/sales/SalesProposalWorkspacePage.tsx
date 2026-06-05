@@ -47,6 +47,12 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import type { ApprovalRoutePreview } from '@/features/workflow/types'
+import {
+  buildBreakupRoleGroups,
+  getBreakupComponentStyle,
+  getBreakupRoleBandStyle,
+} from '@/features/sales/salesBreakupGrouping'
+import { cn } from '@/lib/cn'
 import type {
   ProposalBudgetLine,
   ProposalBreakupLine,
@@ -761,44 +767,8 @@ export function SalesProposalWorkspacePage() {
 
   // ── Tab: Salary Breakup ────────────────────────────────────────────────────
 
-  function groupBreakup(lines: ProposalBreakupLine[]): [string, ProposalBreakupLine[]][] {
-    const map = new Map<string, ProposalBreakupLine[]>()
-    for (const l of lines) {
-      const key = l.component_type ?? 'Other'
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(l)
-    }
-    return [...map.entries()]
-  }
-
   function salaryBreakupTab() {
-    // Get category colors - semantic colors only for borders and text, neutral backgrounds
-    const getCategoryStyle = (type: string) => {
-      const lower = type.toLowerCase()
-      if (lower.includes('earning') || lower.includes('basic')) {
-        return { border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-700 dark:text-emerald-400' }
-      }
-      if (lower.includes('deduction')) {
-        return { border: 'border-red-200 dark:border-red-800', text: 'text-red-700 dark:text-red-400' }
-      }
-      if (lower.includes('allowance')) {
-        return { border: 'border-blue-200 dark:border-blue-800', text: 'text-blue-700 dark:text-blue-400' }
-      }
-      if (lower.includes('total') || lower.includes('gross') || lower.includes('net')) {
-        return { border: 'border-purple-200 dark:border-purple-800', text: 'text-purple-700 dark:text-purple-400' }
-      }
-      return { border: 'border-app-border', text: 'text-app-text' }
-    }
-
-    // Calculate totals per category
-    const groupedData = groupBreakup(breakupLines)
-    const categoryTotals = groupedData.map(([type, lines]) => {
-      const total = lines.reduce((sum, l) => {
-        const amt = typeof l.amount === 'string' ? parseFloat(l.amount.replace(/,/g, '')) : (l.amount ?? 0)
-        return sum + (isNaN(amt) ? 0 : amt)
-      }, 0)
-      return { type, total, count: lines.length }
-    })
+    const roleGroups = buildBreakupRoleGroups(breakupLines, budgetLines)
 
     return (
       <div className="space-y-5">
@@ -813,143 +783,192 @@ export function SalesProposalWorkspacePage() {
           <EmptyState title="No salary breakup lines" description="Breakup lines will appear here once computed by the backend." />
         ) : (
           <>
-            {/* Category summary cards - neutral bg with semantic border and text */}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {categoryTotals.map(({ type, total, count }) => {
-                const style = getCategoryStyle(type)
-                return (
-                  <div key={type} className={`rounded-xl border ${style.border} bg-app-surface p-4 shadow-sm`}>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className={`text-lg font-bold ${style.text}`}>{formatIndianCurrency(total)}</p>
-                        <p className="mt-0.5 text-xs text-app-subtle capitalize">{type.replace(/_/g, ' ')}</p>
-                      </div>
-                      <span className="rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 text-xs font-medium">
-                        {count} items
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            <p className="text-xs text-app-subtle">
+              {roleGroups.length} role{roleGroups.length !== 1 ? 's' : ''} · {breakupLines.length} component
+              {breakupLines.length !== 1 ? 's' : ''}
+            </p>
 
-            {/* Breakup sections */}
-            <div className="space-y-5">
-              {groupedData.map(([type, lines]) => {
-                const style = getCategoryStyle(type)
-                const sortedLines = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-                const sectionTotal = lines.reduce((sum, l) => {
-                  const amt = typeof l.amount === 'string' ? parseFloat(l.amount.replace(/,/g, '')) : (l.amount ?? 0)
-                  return sum + (isNaN(amt) ? 0 : amt)
-                }, 0)
+            <div className="space-y-6">
+              {roleGroups.map((roleGroup, roleIndex) => {
+                const band = getBreakupRoleBandStyle(roleIndex, roleGroup.groupKey)
+                const metaParts: string[] = []
+                if (roleGroup.siteName) metaParts.push(`Site: ${roleGroup.siteName}`)
+                if (roleGroup.headcount != null) {
+                  metaParts.push(`Headcount: ${roleGroup.headcount}`)
+                }
+                if (roleGroup.totalCost != null) {
+                  metaParts.push(`Budget total: ${formatIndianCurrency(roleGroup.totalCost)}`)
+                } else if (roleGroup.unitCost != null) {
+                  metaParts.push(`Unit: ${formatIndianCurrency(roleGroup.unitCost)}`)
+                }
 
                 return (
-                  <div key={type} className={`rounded-xl border ${style.border} overflow-hidden shadow-sm`}>
-                    {/* Section header - brand colors with neutral bg */}
-                    <div className={`flex items-center justify-between bg-brand-500/10 px-4 py-3 border-b ${style.border}`}>
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-brand-600 dark:bg-brand-900/30 dark:text-brand-400">
-                          <IndianRupee className="h-4 w-4" />
+                  <section
+                    key={roleGroup.groupKey}
+                    className={cn(
+                      'overflow-hidden rounded-xl border border-l-4 shadow-sm',
+                      band.border,
+                      band.borderAccent,
+                    )}
+                  >
+                    <div className={cn('border-b px-4 py-3.5', band.headerBorder, band.headerBg)}>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div
+                            className={cn(
+                              'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                              band.iconBg,
+                            )}
+                          >
+                            <Users className={cn('h-5 w-5', band.iconText)} aria-hidden />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className={cn('text-base font-semibold', band.titleText)}>{roleGroup.title}</h3>
+                            {metaParts.length > 0 ? (
+                              <p className={cn('mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs', band.metaText)}>
+                                {metaParts.map((part) => (
+                                  <span key={part}>{part}</span>
+                                ))}
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400">
-                          {type.replace(/_/g, ' ')}
-                        </h3>
-                        <span className="rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 text-xs">
-                          {lines.length} components
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-bold ${style.text}`}>{formatIndianCurrency(sectionTotal)}</p>
-                        <p className="text-[10px] uppercase tracking-wider text-app-subtle">Section Total</p>
+                        <div className="shrink-0 rounded-lg border border-app-border/60 bg-app-surface/80 px-3 py-2 text-left sm:text-right dark:bg-app-surface/40">
+                          <p className={cn('text-base font-bold tabular-nums', band.totalText)}>
+                            {formatIndianCurrency(roleGroup.total)}
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wider text-app-subtle">
+                            Role total
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Section table */}
-                    <div className="overflow-x-auto bg-app-surface">
-                      <Table>
-                        <THead>
-                          <TR className="bg-slate-50/50 dark:bg-slate-800/30">
-                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Component</TH>
-                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle w-24">Code</TH>
-                            <TH className="py-2.5 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-28">Percentage</TH>
-                            <TH className="py-2.5 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-32">Amount</TH>
-                            <TH className="py-2.5 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Notes</TH>
-                            <TH className="py-2.5 px-4 w-14">{''}</TH>
-                          </TR>
-                        </THead>
-                        <TBody>
-                          {sortedLines.map((row, idx) => {
-                            const key = `brk-${row.id}`
-                            return (
-                              <TR key={row.id} className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? '' : 'bg-slate-50/30 dark:bg-slate-800/10'}`}>
-                                <TD className="py-2.5 px-4">
-                                  <p className="text-sm font-medium text-app-text">{row.component_name ?? '—'}</p>
-                                </TD>
-                                <TD className="py-2.5 px-4">
-                                  <code className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-mono text-app-subtle">{row.component_code ?? '—'}</code>
-                                </TD>
-                                <TD className="py-2.5 px-4 text-right">
-                                  {row.percentage != null ? (
-                                    <span className="inline-flex items-center rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-xs font-medium text-brand-700 dark:text-brand-400">
-                                      {row.percentage}%
-                                    </span>
-                                  ) : (
-                                    <span className="text-sm text-app-subtle">—</span>
-                                  )}
-                                </TD>
-                                <TD className="py-2 px-4 text-right">
-                                  {canEdit ? (
-                                    <input
-                                      className={CELL + ' text-right w-28 ml-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
-                                      value={row.amount ?? ''}
-                                      onChange={(e) => {
-                                        const val = e.target.value
-                                        setBreakupLines((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, amount: val } : r)),
-                                        )
-                                      }}
-                                      onBlur={(e) =>
-                                        void saveBreakupField(row.id, { amount: e.currentTarget.value || null })
-                                      }
-                                    />
-                                  ) : (
-                                    <span className={`text-sm font-semibold ${style.text}`}>{formatIndianCurrency(row.amount)}</span>
-                                  )}
-                                </TD>
-                                <TD className="py-2 px-4">
-                                  {canEdit ? (
-                                    <input
-                                      className={CELL + ' w-full rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
-                                      value={row.remarks ?? ''}
-                                      placeholder="Add notes..."
-                                      onChange={(e) => {
-                                        const val = e.target.value
-                                        setBreakupLines((prev) =>
-                                          prev.map((r) => (r.id === row.id ? { ...r, remarks: val } : r)),
-                                        )
-                                      }}
-                                      onBlur={(e) =>
-                                        void saveBreakupField(row.id, { remarks: e.currentTarget.value || undefined })
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="text-sm text-app-secondary">{row.remarks ?? '—'}</span>
-                                  )}
-                                </TD>
-                                <TD className="py-2.5 px-4 text-right">{rowStatus(saveStates, key)}</TD>
-                              </TR>
-                            )
-                          })}
-                        </TBody>
-                      </Table>
+                    <div className={cn('divide-y divide-app-border/80', band.bodyBg)}>
+                      {roleGroup.sections.map((section) => {
+                        const style = getBreakupComponentStyle(section.componentType)
+                        return (
+                          <div key={`${roleGroup.groupKey}-${section.componentType}`}>
+                            <div
+                              className={`flex items-center justify-between border-b px-4 py-2.5 ${style.border} bg-app-muted/30`}
+                            >
+                              <h4 className={`text-xs font-semibold uppercase tracking-wider ${style.text}`}>
+                                {section.label}
+                              </h4>
+                              <p className={`text-sm font-semibold ${style.text}`}>
+                                {formatIndianCurrency(section.total)}
+                              </p>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <Table>
+                                <THead>
+                                  <TR className="bg-slate-50/50 dark:bg-slate-800/30">
+                                    <TH className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">
+                                      Component
+                                    </TH>
+                                    <TH className="w-28 px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">
+                                      Percentage
+                                    </TH>
+                                    <TH className="w-32 px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">
+                                      Amount
+                                    </TH>
+                                    <TH className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">
+                                      Notes
+                                    </TH>
+                                    <TH className="w-14 px-4 py-2">{''}</TH>
+                                  </TR>
+                                </THead>
+                                <TBody>
+                                  {section.rows.map((row, idx) => {
+                                    const key = `brk-${row.id}`
+                                    return (
+                                      <TR
+                                        key={row.id}
+                                        className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? '' : 'bg-slate-50/30 dark:bg-slate-800/10'}`}
+                                      >
+                                        <TD className="px-4 py-2.5">
+                                          <p className="text-sm font-medium text-app-text">
+                                            {row.component_name ?? '—'}
+                                          </p>
+                                        </TD>
+                                        <TD className="px-4 py-2.5 text-right">
+                                          {row.percentage != null && row.percentage !== '' ? (
+                                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/20 dark:text-brand-400">
+                                              {row.percentage}%
+                                            </span>
+                                          ) : (
+                                            <span className="text-sm text-app-subtle">—</span>
+                                          )}
+                                        </TD>
+                                        <TD className="px-4 py-2 text-right">
+                                          {canEdit ? (
+                                            <input
+                                              className={
+                                                CELL +
+                                                ' ml-auto w-28 rounded-lg border border-transparent text-right hover:border-app-border focus:border-brand-500'
+                                              }
+                                              value={row.amount ?? ''}
+                                              onChange={(e) => {
+                                                const val = e.target.value
+                                                setBreakupLines((prev) =>
+                                                  prev.map((r) => (r.id === row.id ? { ...r, amount: val } : r)),
+                                                )
+                                              }}
+                                              onBlur={(e) =>
+                                                void saveBreakupField(row.id, {
+                                                  amount: e.currentTarget.value || null,
+                                                })
+                                              }
+                                            />
+                                          ) : (
+                                            <span className={`text-sm font-semibold ${style.text}`}>
+                                              {formatIndianCurrency(row.amount)}
+                                            </span>
+                                          )}
+                                        </TD>
+                                        <TD className="px-4 py-2">
+                                          {canEdit ? (
+                                            <input
+                                              className={
+                                                CELL +
+                                                ' w-full rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'
+                                              }
+                                              value={row.remarks ?? ''}
+                                              placeholder="Add notes..."
+                                              onChange={(e) => {
+                                                const val = e.target.value
+                                                setBreakupLines((prev) =>
+                                                  prev.map((r) => (r.id === row.id ? { ...r, remarks: val } : r)),
+                                                )
+                                              }}
+                                              onBlur={(e) =>
+                                                void saveBreakupField(row.id, {
+                                                  remarks: e.currentTarget.value || undefined,
+                                                })
+                                              }
+                                            />
+                                          ) : (
+                                            <span className="text-sm text-app-secondary">{row.remarks ?? '—'}</span>
+                                          )}
+                                        </TD>
+                                        <TD className="px-4 py-2.5 text-right">{rowStatus(saveStates, key)}</TD>
+                                      </TR>
+                                    )
+                                  })}
+                                </TBody>
+                              </Table>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  </div>
+                  </section>
                 )
               })}
             </div>
 
-            <p className="text-xs text-app-subtle flex items-center gap-1.5">
-              <FileText className="h-3 w-3" />
+            <p className="flex items-center gap-1.5 text-xs text-app-subtle">
+              <FileText className="h-3 w-3" aria-hidden />
               Calculation rules are managed separately in proposal settings.
             </p>
           </>

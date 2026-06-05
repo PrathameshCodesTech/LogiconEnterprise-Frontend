@@ -1,7 +1,6 @@
 ﻿import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/authStore'
-import { hasAnyCapability } from '@/lib/capabilities'
-import { navGroups } from '@/components/layout/navConfig'
+import { buildNavGroups } from '@/components/layout/navConfig'
 import { LogoBand } from '@/components/brand/LogoBand'
 import { shellNavIconClassName, shellNavLinkClassName } from '@/components/layout/navLinkStyles'
 import { useNotificationStore } from '@/features/notifications/useNotifications'
@@ -47,20 +46,10 @@ export function MobileNav({
   open: boolean
   onClose: () => void
 }) {
-  const caps = useAuthStore((s) => s.me?.capabilities ?? [])
+  const me = useAuthStore((s) => s.me)
   const unreadByArea = useNotificationStore((s) => s.unreadByArea)
 
-  const visibleGroups = navGroups
-    .map((group) => ({
-      label: group.label,
-      items: group.items.filter((item) => {
-        if (!item.requiredCapabilities?.length) {
-          return true
-        }
-        return hasAnyCapability(caps, item.requiredCapabilities)
-      }),
-    }))
-    .filter((g) => g.items.length > 0)
+  const visibleGroups = buildNavGroups(me)
 
   if (!open) {
     return null

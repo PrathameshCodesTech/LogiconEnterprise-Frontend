@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { getDashboardSummary } from '@/api/dashboard'
+import { listClientReviewApplications } from '@/api/hiring'
+import { listEmployees } from '@/api/deployment'
 import type { DashboardSummaryResponse } from '@/features/dashboard/types'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { MyWorkWidget } from '@/features/dashboard/widgets/MyWorkWidget'
+import { ClientKpiRow } from '@/features/dashboard/widgets/ClientKpiRow'
 import { ClientOverviewWidget } from '@/features/dashboard/widgets/ClientOverviewWidget'
 import { MRFSummaryWidget } from '@/features/dashboard/widgets/MRFSummaryWidget'
 import { OnboardingSummaryWidget } from '@/features/dashboard/widgets/OnboardingSummaryWidget'
@@ -58,6 +61,8 @@ export function DashboardPage() {
   const [data, setData] = useState<DashboardSummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [pendingReviews, setPendingReviews] = useState<number | null>(null)
+  const [deployedEmployees, setDeployedEmployees] = useState<number | null>(null)
 
   const fetchSummary = useCallback(() => {
     setLoading(true)
@@ -81,6 +86,31 @@ export function DashboardPage() {
   useEffect(() => {
     fetchSummary()
   }, [fetchSummary])
+
+  const isClientAudience = data?.audience === 'client'
+
+  useEffect(() => {
+    if (!isClientAudience) return
+    let cancelled = false
+    setPendingReviews(null)
+    setDeployedEmployees(null)
+    void (async () => {
+      const [reviewRes, employeeRes] = await Promise.allSettled([
+        listClientReviewApplications({ only_pending: true }),
+        listEmployees({ status: 'active' }),
+      ])
+      if (cancelled) return
+      if (reviewRes.status === 'fulfilled') {
+        setPendingReviews(reviewRes.value.count ?? reviewRes.value.items.length)
+      }
+      if (employeeRes.status === 'fulfilled') {
+        setDeployedEmployees(employeeRes.value.count ?? employeeRes.value.items.length)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isClientAudience])
 
   if (loading && !data) {
     return (
@@ -134,6 +164,18 @@ export function DashboardPage() {
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
+
+      {/* Client KPI row */}
+      {isClient ? (
+        <ClientKpiRow
+          activeSites={sections.client_overview.site_count}
+          approvedBudgets={sections.budget.plan_count}
+          availableBudget={sections.budget.available_amount}
+          mrfsInApproval={sections.mrf.in_review}
+          candidateReviewsPending={pendingReviews}
+          deployedEmployees={deployedEmployees}
+        />
+      ) : null}
 
       {/* Widgets Grid */}
       {isClient ? (

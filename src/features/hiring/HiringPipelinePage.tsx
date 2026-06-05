@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import { listHiringApplications, listPipelineStages } from '@/api/hiring'
 import { parseApiError } from '@/lib/apiError'
@@ -32,6 +33,10 @@ export function HiringPipelinePage() {
 
   const [moveTarget, setMoveTarget] = useState<HiringApplicationRow | null>(null)
   const [dragTargetStageId, setDragTargetStageId] = useState<number | null>(null)
+
+  const [searchParams] = useSearchParams()
+  const highlightParam = searchParams.get('application')
+  const highlightedAppId = highlightParam && Number.isFinite(Number(highlightParam)) ? Number(highlightParam) : null
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -231,6 +236,7 @@ export function HiringPipelinePage() {
           canMove={canMove}
           onMove={setMoveTarget}
           onDropApplication={handleDropApplication}
+          highlightedAppId={highlightedAppId}
         />
       </div>
 

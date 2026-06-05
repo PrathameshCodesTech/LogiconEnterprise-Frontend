@@ -12,6 +12,7 @@ import { listSites, type SiteProfileRow } from '@/api/sites'
 import { listJobRoles, type JobRoleRow } from '@/api/jobs'
 import { listWageCategories, type WageCategoryRow } from '@/api/wages'
 import { useAuthStore } from '@/features/auth/authStore'
+import { isClientFacingUser } from '@/lib/userRoleMode'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
@@ -51,6 +52,10 @@ function toNumberOrNull(v: string): number | null {
   return n
 }
 
+function fmtHeadcount(v: number | null | undefined): string {
+  return v == null ? '—' : String(v)
+}
+
 function CompactSelect({
   value,
   onChange,
@@ -78,10 +83,12 @@ function CompactSelect({
 }
 
 export function SiteRoleRequirementsPage() {
-  const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
-  const canCreate = hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_CREATE])
-  const canUpdate = hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_UPDATE])
-  const canDelete = hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_DELETE])
+  const me = useAuthStore((s) => s.me)
+  const meCaps = me?.capabilities ?? []
+  const isClient = isClientFacingUser(me)
+  const canCreate = !isClient && hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_CREATE])
+  const canUpdate = !isClient && hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_UPDATE])
+  const canDelete = !isClient && hasAnyCapability(meCaps, [CAP.SITE_ROLE_REQUIREMENT_DELETE])
   const canLookupWage = hasAnyCapability(meCaps, [CAP.WAGE_READ])
 
   const [params, setParams] = useSearchParams()
@@ -126,6 +133,10 @@ export function SiteRoleRequirementsPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const formId = useMemo(() => `srr-form-${drawerMode}`, [drawerMode])
 
+  const [deactivateId, setDeactivateId] = useState<number | null>(null)
+  const [deactivateBusyId, setDeactivateBusyId] = useState<number | null>(null)
+  const [deactivateError, setDeactivateError] = useState<string | null>(null)
+
   function updateParam(next: Record<string, string | null>) {
     const p = new URLSearchParams(params)
     Object.entries(next).forEach(([k, v]) => {
@@ -159,10 +170,19 @@ export function SiteRoleRequirementsPage() {
     setLookupError(null)
     try {
       // Note: endpoints may be large; start with first page for now.
-      const [s, r, w] = await Promise.all([listSites({ search: '', page: 1 }), listJobRoles(), listWageCategories()])
-      setSites(s.items)
-      setJobRoles(r)
-      setWageCategories(w)
+      // Client users only need site/role labels for filters; wage categories are an
+      // internal master they have no access to, so skip that call for them.
+      if (isClient) {
+        const [s, r] = await Promise.all([listSites({ search: '', page: 1 }), listJobRoles()])
+        setSites(s.items)
+        setJobRoles(r)
+        setWageCategories([])
+      } else {
+        const [s, r, w] = await Promise.all([listSites({ search: '', page: 1 }), listJobRoles(), listWageCategories()])
+        setSites(s.items)
+        setJobRoles(r)
+        setWageCategories(w)
+      }
     } catch (e: unknown) {
       setSites([])
       setJobRoles([])
@@ -244,13 +264,21 @@ export function SiteRoleRequirementsPage() {
 
   async function handleDeactivate(r: SiteRoleRequirementRow) {
     if (!canDelete) return
-    const ok = window.confirm('Deactivate this requirement? This sets is_active=false.')
-    if (!ok) return
+    if (deactivateId !== r.id) {
+      setDeactivateId(r.id)
+      setDeactivateError(null)
+      return
+    }
+    setDeactivateBusyId(r.id)
+    setDeactivateError(null)
     try {
       await deactivateSiteRoleRequirement(r.id)
+      setDeactivateId(null)
       await refresh()
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Deactivate failed').message)
+      setDeactivateError(parseApiError(e, 'Deactivate failed').message)
+    } finally {
+      setDeactivateBusyId(null)
     }
   }
 
@@ -272,39 +300,51 @@ export function SiteRoleRequirementsPage() {
 
           <dl className="mt-3 grid gap-2 text-xs">
             <div className="flex items-center justify-between gap-3">
-              <dt className="text-app-subtle">Headcount</dt>
-              <dd className="font-semibold text-app-text">{r.approved_headcount}</dd>
+              <dt className="text-app-subtle">Approved</dt>
+              <dd className="font-semibold text-app-text">{fmtHeadcount(r.approved_headcount)}</dd>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <dt className="text-app-subtle">Billing</dt>
-              <dd className="font-medium text-app-text">
-                {r.billing_type}
-                {r.billing_rate ? <span className="text-app-secondary"> · {r.billing_rate}</span> : null}
-              </dd>
+              <dt className="text-app-subtle">Allocated</dt>
+              <dd className="font-medium text-app-text">{fmtHeadcount(r.allocated_headcount)}</dd>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <dt className="text-app-subtle">Wage</dt>
-              <dd className="font-medium text-app-text">
-                {r.wage_min || r.wage_max ? `${r.wage_min ?? '—'} - ${r.wage_max ?? '—'}` : '—'}
-              </dd>
+              <dt className="text-app-subtle">Remaining</dt>
+              <dd className="font-semibold text-app-text">{fmtHeadcount(r.remaining_headcount)}</dd>
             </div>
-            {r.wage_rate != null ? (
-              <div className="flex items-start justify-between gap-3">
-                <dt className="text-app-subtle">Matched wage rate</dt>
-                <dd className="max-w-[60%] text-right text-xs text-app-secondary">
-                  #{r.wage_rate}
-                  {r.wage_rate_monthly_snapshot ? ` · ${r.wage_rate_monthly_snapshot}/mo` : ''}
-                  {r.wage_rate_source_snapshot ? ` · ${r.wage_rate_source_snapshot}` : ''}
-                </dd>
-              </div>
-            ) : null}
-            {r.wage_category ? (
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-app-subtle">Category</dt>
-                <dd className="text-app-secondary">
-                  {wageLabel.get(r.wage_category) ?? `#${r.wage_category}`}
-                </dd>
-              </div>
+            {!isClient ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-app-subtle">Billing</dt>
+                  <dd className="font-medium text-app-text">
+                    {r.billing_type}
+                    {r.billing_rate ? <span className="text-app-secondary"> · {r.billing_rate}</span> : null}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-app-subtle">Wage</dt>
+                  <dd className="font-medium text-app-text">
+                    {r.wage_min || r.wage_max ? `${r.wage_min ?? '—'} - ${r.wage_max ?? '—'}` : '—'}
+                  </dd>
+                </div>
+                {r.wage_rate != null ? (
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-app-subtle">Matched wage rate</dt>
+                    <dd className="max-w-[60%] text-right text-xs text-app-secondary">
+                      #{r.wage_rate}
+                      {r.wage_rate_monthly_snapshot ? ` · ${r.wage_rate_monthly_snapshot}/mo` : ''}
+                      {r.wage_rate_source_snapshot ? ` · ${r.wage_rate_source_snapshot}` : ''}
+                    </dd>
+                  </div>
+                ) : null}
+                {r.wage_category ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-app-subtle">Category</dt>
+                    <dd className="text-app-secondary">
+                      {wageLabel.get(r.wage_category) ?? `#${r.wage_category}`}
+                    </dd>
+                  </div>
+                ) : null}
+              </>
             ) : null}
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Effective</dt>
@@ -315,18 +355,29 @@ export function SiteRoleRequirementsPage() {
             </div>
           </dl>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {canUpdate ? (
-              <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
-                Edit
-              </Button>
-            ) : null}
-            {canDelete ? (
-              <Button variant="danger" className="min-h-9 px-3" onClick={() => handleDeactivate(r)}>
-                Deactivate
-              </Button>
-            ) : null}
-          </div>
+          {canUpdate || canDelete ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {canUpdate ? (
+                <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
+                  Edit
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  variant="danger"
+                  className="min-h-9 px-3"
+                  disabled={deactivateBusyId === r.id}
+                  onClick={() => void handleDeactivate(r)}
+                >
+                  {deactivateBusyId === r.id
+                    ? 'Deactivating...'
+                    : deactivateId === r.id
+                      ? 'Confirm deactivate'
+                      : 'Deactivate'}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>
@@ -347,6 +398,7 @@ export function SiteRoleRequirementsPage() {
       </div>
 
       {lookupError ? <ErrorState message={`Lookup API failed. Create/Edit is disabled. ${lookupError}`} /> : null}
+      {deactivateError ? <ErrorState message={deactivateError} /> : null}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <div className="flex-1">
@@ -435,12 +487,14 @@ export function SiteRoleRequirementsPage() {
                 <TR>
                   <TH>Site</TH>
                   <TH>Job role</TH>
-                  <TH>Headcount</TH>
-                  <TH>Billing</TH>
-                  <TH>Wage</TH>
+                  <TH>Approved</TH>
+                  <TH>Allocated</TH>
+                  <TH>Remaining</TH>
+                  {!isClient ? <TH>Billing</TH> : null}
+                  {!isClient ? <TH>Wage</TH> : null}
                   <TH>Effective</TH>
                   <TH>Status</TH>
-                  <TH className="text-right">Actions</TH>
+                  {!isClient ? <TH className="text-right">Actions</TH> : null}
                 </TR>
               </THead>
               <TBody>
@@ -448,38 +502,55 @@ export function SiteRoleRequirementsPage() {
                   <TR key={r.id}>
                     <TD className="text-app-text">{siteLabel.get(r.site) ?? `Site #${r.site}`}</TD>
                     <TD className="text-app-text">{roleLabel.get(r.job_role) ?? `Job role #${r.job_role}`}</TD>
-                    <TD className="text-app-secondary">{r.approved_headcount}</TD>
-                    <TD className="text-app-secondary">{r.billing_type}{r.billing_rate ? ` - ${r.billing_rate}` : ''}</TD>
-                    <TD className="text-app-secondary">
-                      {r.wage_min || r.wage_max ? `${r.wage_min ?? '-'} - ${r.wage_max ?? '-'}` : '-'}
-                      {r.wage_category ? <div className="text-xs text-app-subtle">{wageLabel.get(r.wage_category) ?? `#${r.wage_category}`}</div> : null}
-                      {r.wage_rate != null ? (
-                        <div className="mt-1 text-xs text-app-subtle">
-                          Rate #{r.wage_rate}
-                          {r.wage_rate_monthly_snapshot ? ` · ${r.wage_rate_monthly_snapshot}/mo` : ''}
-                          {r.wage_rate_effective_from_snapshot ? ` · from ${r.wage_rate_effective_from_snapshot}` : ''}
-                        </div>
-                      ) : null}
-                    </TD>
+                    <TD className="text-app-secondary">{fmtHeadcount(r.approved_headcount)}</TD>
+                    <TD className="text-app-secondary">{fmtHeadcount(r.allocated_headcount)}</TD>
+                    <TD className="font-semibold text-app-text">{fmtHeadcount(r.remaining_headcount)}</TD>
+                    {!isClient ? (
+                      <TD className="text-app-secondary">{r.billing_type}{r.billing_rate ? ` - ${r.billing_rate}` : ''}</TD>
+                    ) : null}
+                    {!isClient ? (
+                      <TD className="text-app-secondary">
+                        {r.wage_min || r.wage_max ? `${r.wage_min ?? '-'} - ${r.wage_max ?? '-'}` : '-'}
+                        {r.wage_category ? <div className="text-xs text-app-subtle">{wageLabel.get(r.wage_category) ?? `#${r.wage_category}`}</div> : null}
+                        {r.wage_rate != null ? (
+                          <div className="mt-1 text-xs text-app-subtle">
+                            Rate #{r.wage_rate}
+                            {r.wage_rate_monthly_snapshot ? ` · ${r.wage_rate_monthly_snapshot}/mo` : ''}
+                            {r.wage_rate_effective_from_snapshot ? ` · from ${r.wage_rate_effective_from_snapshot}` : ''}
+                          </div>
+                        ) : null}
+                      </TD>
+                    ) : null}
                     <TD className="text-app-secondary">
                       {r.effective_from}
                       {r.effective_to ? ` -> ${r.effective_to}` : ''}
                     </TD>
                     <TD>{r.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}</TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {canUpdate ? (
-                          <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
-                            Edit
-                          </Button>
-                        ) : null}
-                        {canDelete ? (
-                          <Button variant="danger" className="min-h-9 px-3" onClick={() => handleDeactivate(r)}>
-                            Deactivate
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TD>
+                    {!isClient ? (
+                      <TD className="text-right">
+                        <div className="flex justify-end gap-2">
+                          {canUpdate ? (
+                            <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
+                              Edit
+                            </Button>
+                          ) : null}
+                          {canDelete ? (
+                            <Button
+                              variant="danger"
+                              className="min-h-9 px-3"
+                              disabled={deactivateBusyId === r.id}
+                              onClick={() => void handleDeactivate(r)}
+                            >
+                              {deactivateBusyId === r.id
+                                ? 'Deactivating...'
+                                : deactivateId === r.id
+                                  ? 'Confirm deactivate'
+                                  : 'Deactivate'}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TD>
+                    ) : null}
                   </TR>
                 ))}
               </TBody>

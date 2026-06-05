@@ -95,6 +95,10 @@ export const CAP = {
   PIPELINE_STAGE_READ: 'pipeline_stage.read',
   CANDIDATE_MATCH_READ: 'candidate_match.read',
 
+  INTERVIEW_READ: 'interview.read',
+  INTERVIEW_CREATE: 'interview.create',
+  INTERVIEW_MANAGE: 'interview.manage',
+
   OFFER_READ: 'offer.read',
   OFFER_CREATE: 'offer.create',
   OFFER_UPDATE: 'offer.update',

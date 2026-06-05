@@ -12,7 +12,6 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
-import { hiringApplicationStatusLabel } from '@/features/talent/talentLabels'
 import type { ClientReviewApplicationRow } from '@/features/hiring/types'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -114,7 +113,7 @@ function CandidateDrawer({
             <div className="flex gap-2">
               <Button
                 type="button"
-                className="flex-1 gap-1 min-h-9 text-sm bg-status-hired/90 hover:bg-status-hired text-white"
+                className="flex-1 gap-1 min-h-9 text-sm bg-status-hired text-white hover:opacity-90"
                 disabled={deciding}
                 onClick={() => void decide('approved')}
               >
@@ -172,13 +171,11 @@ function CandidateDrawer({
         ) : null}
 
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-secondary">Application</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-secondary">Requested role</h3>
           <div className="space-y-1 text-sm">
-            <KV label="Status" value={
-              <Badge variant="neutral" className="text-[11px]">
-                {hiringApplicationStatusLabel(app.status)}
-              </Badge>
-            } />
+            {app.job_role_name ? <KV label="Role" value={app.job_role_name} /> : null}
+            {app.site_name ? <KV label="Site" value={app.site_name} /> : null}
+            {app.client_name ? <KV label="Client" value={app.client_name} /> : null}
             {app.match_score != null ? <KV label="Match score" value={fmtScore(app.match_score)} /> : null}
             {app.client_decision ? (
               <KV label="Decision" value={
@@ -220,7 +217,6 @@ export function ClientReviewPage() {
   const [search, setSearch] = useState('')
   const [onlyPending, setOnlyPending] = useState(false)
   const [decisionFilter, setDecisionFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
 
   const [selectedApp, setSelectedApp] = useState<ClientReviewApplicationRow | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -233,16 +229,15 @@ export function ClientReviewPage() {
         search: search.trim() || undefined,
         only_pending: onlyPending || undefined,
         client_decision: decisionFilter || undefined,
-        status: statusFilter || undefined,
       })
       setRows(res.items)
       setCount(res.count)
     } catch (e: unknown) {
-      setError(parseApiError(e, 'Could not load client review queue').message)
+      setError(parseApiError(e, 'Could not load candidate review queue').message)
     } finally {
       setLoading(false)
     }
-  }, [search, onlyPending, decisionFilter, statusFilter])
+  }, [search, onlyPending, decisionFilter])
 
   useEffect(() => {
     void load()
@@ -269,20 +264,12 @@ export function ClientReviewPage() {
     { value: 'rejected', label: 'Rejected' },
   ]
 
-  const STATUS_OPTS = [
-    { value: '', label: 'Any status' },
-    { value: 'client_review', label: 'Client review' },
-    { value: 'selected', label: 'Selected' },
-    { value: 'rejected', label: 'Rejected' },
-    { value: 'shortlisted', label: 'Shortlisted' },
-  ]
-
   return (
     <div className="w-full space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-app-text">Client review</h2>
+        <h2 className="text-lg font-semibold text-app-text">Candidate review</h2>
         <p className="text-sm text-app-secondary">
-          Candidates submitted for client approval. Approve or reject each application.
+          Review candidates shared for your approval. Approve or reject each candidate for the requested role.
         </p>
       </div>
 
@@ -303,13 +290,6 @@ export function ClientReviewPage() {
           className="h-8 rounded border border-app-border bg-app-surface px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
         >
           {DECISION_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded border border-app-border bg-app-surface px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
-        >
-          {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <input
@@ -346,51 +326,57 @@ export function ClientReviewPage() {
             <THead>
               <TR>
                 <TH className="py-2">Candidate</TH>
-                <TH className="py-2">Role</TH>
-                <TH className="py-2">Site / Client</TH>
-                <TH className="py-2">Score</TH>
-                <TH className="py-2">Status</TH>
+                <TH className="py-2">Role / site</TH>
+                <TH className="py-2">Experience</TH>
+                <TH className="py-2">Match</TH>
+                <TH className="py-2">Summary</TH>
                 <TH className="py-2">Decision</TH>
-                <TH className="py-2">Decided</TH>
                 <TH className="py-2 text-right"> </TH>
               </TR>
             </THead>
             <TBody>
               {rows.map((app) => {
                 const cs = app.candidate_summary
+                const rs = app.resume_summary
                 return (
                   <TR key={app.id}>
                     <TD className="py-2">
                       <p className="text-sm font-medium text-app-text">
                         {cs?.full_name || `Candidate #${app.candidate}`}
                       </p>
-                      {cs?.phone ? (
-                        <p className="font-mono text-xs text-app-secondary">{cs.phone}</p>
-                      ) : null}
                       {cs?.current_role ? (
-                        <p className="text-xs text-app-subtle">{cs.current_role}</p>
+                        <p className="text-xs text-app-secondary">{cs.current_role}</p>
+                      ) : null}
+                      {cs?.phone ? (
+                        <p className="font-mono text-[11px] text-app-subtle">{cs.phone}</p>
                       ) : null}
                     </TD>
-                    <TD className="py-2 text-xs">{app.job_role_name ?? `Role #${app.job_role}`}</TD>
                     <TD className="py-2 text-xs text-app-secondary">
+                      <p className="text-app-text">{app.job_role_name ?? `Role #${app.job_role}`}</p>
                       <p>{app.site_name ?? `Site #${app.site}`}</p>
-                      {app.client_name ? <p>{app.client_name}</p> : null}
+                      {app.client_name ? <p className="text-app-subtle">{app.client_name}</p> : null}
+                    </TD>
+                    <TD className="py-2 text-xs text-app-secondary">
+                      <p>{cs?.total_experience_years ? `${cs.total_experience_years} yrs` : '—'}</p>
+                      {cs?.current_location ? <p className="text-app-subtle">{cs.current_location}</p> : null}
                     </TD>
                     <TD className="py-2 text-xs font-medium">{fmtScore(app.match_score)}</TD>
-                    <TD className="py-2">
-                      <Badge variant="neutral" className="text-[11px]">
-                        {hiringApplicationStatusLabel(app.status)}
-                      </Badge>
+                    <TD className="py-2 max-w-[260px] text-xs text-app-secondary">
+                      {rs?.summary ? (
+                        <span className="line-clamp-2">{rs.summary}</span>
+                      ) : (
+                        <span className="text-app-subtle">—</span>
+                      )}
                     </TD>
                     <TD className="py-2">
                       {app.client_decision ? (
                         <Badge variant={decisionVariant(app.client_decision)} className="text-[11px]">
                           {app.client_decision}
                         </Badge>
-                      ) : <span className="text-xs text-app-subtle">—</span>}
-                    </TD>
-                    <TD className="py-2 text-xs text-app-secondary">
-                      {fmtDate(app.client_decision_at)}
+                      ) : <Badge variant="warning" className="text-[11px]">Pending</Badge>}
+                      {app.client_decision_at ? (
+                        <p className="mt-0.5 text-[11px] text-app-subtle">{fmtDate(app.client_decision_at)}</p>
+                      ) : null}
                     </TD>
                     <TD className="py-2 text-right">
                       <Button

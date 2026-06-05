@@ -2,7 +2,7 @@
 import axios from 'axios'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
-import { deleteMRF, getMRF, getMRFReadiness } from '@/api/mrf'
+import { deleteMRF, getMRF, getMRFReadiness, listMRFLineItems } from '@/api/mrf'
 import { departmentToFormOption, listDepartments, type DepartmentOption, type DepartmentRow } from '@/api/departments'
 import {
   getMRFWorkflowConfigCheck,
@@ -22,11 +22,16 @@ import { Spinner } from '@/components/ui/Spinner'
 import type { SiteOption } from '@/features/mrf/MRFForm'
 import { MRFCreateWorkspaceDrawer } from '@/features/mrf/MRFCreateWorkspaceDrawer'
 import { MRFLineItemsTable } from '@/features/mrf/MRFLineItemsTable'
+import { MRFClientDetailApproval } from '@/features/mrf/MRFClientDetailApproval'
+import { MrfSectionPanel } from '@/features/mrf/mrfClientFormLayout'
+import { MRFClientDetailOverview } from '@/features/mrf/MRFClientDetailOverview'
 import { MRFClientFormDisplay } from '@/features/mrf/MRFClientFormDisplay'
+import { useClientMrfWorkspace } from '@/features/mrf/mrfClientMode'
+import { isClientFacingUser } from '@/lib/userRoleMode'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
 import { MRFReadinessPanel } from '@/features/mrf/MRFReadinessPanel'
 import { formatMrfWorkflowStartError, normalizeMrfReadiness } from '@/features/mrf/mrfReadiness'
-import type { MRFReadinessResponse, MRFRow } from '@/features/mrf/types'
+import type { MRFLineItemRow, MRFReadinessResponse, MRFRow } from '@/features/mrf/types'
 import { MRFBudgetImpactPanel, mrfReservationStatusCopy } from '@/features/mrf/mrfBudgetContext'
 import { WorkflowActionBox } from '@/features/workflow/WorkflowActionBox'
 import { WorkflowConfigCheckDrawer } from '@/features/workflow/WorkflowConfigCheckDrawer'
@@ -107,11 +112,16 @@ export function MRFDetailPage() {
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null)
   const [startInlineError, setStartInlineError] = useState<string | null>(null)
 
+  const [inlineConfigCheck, setInlineConfigCheck] = useState<WorkflowConfigCheck | null>(null)
+  const [inlineConfigLoading, setInlineConfigLoading] = useState(false)
+  const [inlineConfigError, setInlineConfigError] = useState<string | null>(null)
+
   const [readiness, setReadiness] = useState<MRFReadinessResponse | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [readinessError, setReadinessError] = useState<string | null>(null)
   const [lineItemsVersion, setLineItemsVersion] = useState(0)
   const [lineItemsOpenCreate, setLineItemsOpenCreate] = useState(false)
+  const [detailLineItems, setDetailLineItems] = useState<MRFLineItemRow[]>([])
 
   const selectedRoute = useMemo(
     () => availableRoutes.find((r) => r.id === selectedRouteId) ?? null,
@@ -134,6 +144,8 @@ export function MRFDetailPage() {
     () => (row ? mrfReservationStatusCopy(row, row.workflow_status) : null),
     [row],
   )
+
+  const isClientView = useClientMrfWorkspace(row)
 
   const loadWorkflowInstance = useCallback(async (instanceId: number) => {
     if (!canWorkflowRead) {
@@ -204,7 +216,7 @@ export function MRFDetailPage() {
 
   function handleLineItemsChanged() {
     setLineItemsVersion((v) => v + 1)
-    if (row) void loadReadiness(row)
+    void reloadMrfAndWorkflow()
   }
 
   async function handleCheckConfig() {
@@ -275,6 +287,11 @@ export function MRFDetailPage() {
   }
 
   async function loadDepartmentOptions() {
+    if (isClientFacingUser(me)) {
+      setDepartmentOptions([])
+      setDepartmentsLoading(false)
+      return
+    }
     setDepartmentsLoading(true)
     setDepartmentsError(null)
     try {
@@ -377,6 +394,69 @@ export function MRFDetailPage() {
   }, [row, row?.site, canWorkflowStart, siteRowForMrf?.client])
 
   useEffect(() => {
+    if (!isClientView || !row || !isWorkflowNotStarted || !canWorkflowStart) {
+      setInlineConfigCheck(null)
+      setInlineConfigLoading(false)
+      setInlineConfigError(null)
+      return
+    }
+    if (routesLoading) return
+    if (availableRoutes.length > 0) {
+      setInlineConfigCheck(null)
+      setInlineConfigLoading(false)
+      setInlineConfigError(null)
+      return
+    }
+
+    let cancelled = false
+    setInlineConfigLoading(true)
+    setInlineConfigError(null)
+    setInlineConfigCheck(null)
+
+    void (async () => {
+      try {
+        const data = await getMRFWorkflowConfigCheck(mrfId)
+        if (!cancelled) setInlineConfigCheck(data)
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setInlineConfigCheck(null)
+          setInlineConfigError(parseApiError(e, 'Could not verify default approval flow.').message)
+        }
+      } finally {
+        if (!cancelled) setInlineConfigLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    isClientView,
+    row,
+    isWorkflowNotStarted,
+    canWorkflowStart,
+    routesLoading,
+    availableRoutes.length,
+    mrfId,
+  ])
+
+  useEffect(() => {
+    if (!Number.isFinite(mrfId)) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await listMRFLineItems({ mrf: mrfId })
+        if (!cancelled) setDetailLineItems(res.items)
+      } catch {
+        if (!cancelled) setDetailLineItems([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mrfId, lineItemsVersion])
+
+  useEffect(() => {
     if (!row) return
     void loadReadiness(row)
   }, [row?.id, row?.budget_plan, row?.billing_type, lineItemsVersion, loadReadiness])
@@ -414,58 +494,194 @@ export function MRFDetailPage() {
   if (error) return <ErrorState message={error} />
   if (!row) return <EmptyState title="MRF not found" description="This request may have been removed." />
 
-  return (
-    <div className="w-full space-y-6">
-      <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
+  const siteLabel = siteNameById.get(row.site) ?? `Site #${row.site}`
+
+  const pageHeader = (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        {isClientView ? (
+          <>
+            <h2 className="text-base font-semibold text-app-text">Manpower request #{row.id}</h2>
+            <p className="mt-0.5 text-sm text-app-secondary">{siteLabel}</p>
+          </>
+        ) : (
+          <>
             <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">MRF</p>
             <h2 className="mt-1 truncate text-lg font-semibold text-app-text">
               #{row.id}
               {row.request_number?.trim() ? (
-                <span className="ml-2 font-mono text-sm font-normal text-app-secondary">({row.request_number})</span>
+                <span className="ml-2 font-mono text-sm font-normal text-app-secondary">
+                  ({row.request_number})
+                </span>
               ) : null}
             </h2>
             <p className="mt-1 text-sm text-app-secondary">
-              {siteNameById.get(row.site) ?? `Site #${row.site}`} - {new Date(row.created_at).toLocaleString()}
+              {siteLabel} - {new Date(row.created_at).toLocaleString()}
             </p>
-          </div>
+          </>
+        )}
+      </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <MRFStatusBadge status={row.status} />
-            {row.client_visible ? <Badge variant="info">Client visible</Badge> : null}
-            <Button
-              variant="secondary"
-              className="min-h-9 px-2"
-              onClick={() => navigate('/mrf')}
-              aria-label="Back to MRF list"
-              title="Back"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-            </Button>
-            {canUpdate ? (
-              <Button variant="secondary" className="min-h-9 px-2" onClick={openEdit} aria-label="Edit MRF" title="Edit">
-                <Pencil className="h-4 w-4" aria-hidden />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <MRFStatusBadge status={row.status} />
+        {!isClientView && row.client_visible ? <Badge variant="info">Client visible</Badge> : null}
+        <Button
+          variant="secondary"
+          className="min-h-9 px-2"
+          onClick={() => navigate('/mrf')}
+          aria-label="Back to MRF list"
+          title="Back"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+        </Button>
+        {canUpdate ? (
+          <Button variant="secondary" className="min-h-9 px-2" onClick={openEdit} aria-label="Edit MRF" title="Edit">
+            <Pencil className="h-4 w-4" aria-hidden />
+          </Button>
+        ) : null}
+        {canDelete && !isClientView ? (
+          deleteConfirm ? (
+            <>
+              <Button variant="secondary" className="min-h-9 px-3" onClick={() => setDeleteConfirm(false)} disabled={deleteBusy}>
+                Cancel
               </Button>
-            ) : null}
-            {canDelete ? (
-              deleteConfirm ? (
-                <>
-                  <Button variant="secondary" className="min-h-9 px-3" onClick={() => setDeleteConfirm(false)} disabled={deleteBusy}>
-                    Cancel
-                  </Button>
-                  <Button variant="danger" className="min-h-9 px-3" onClick={handleDelete} disabled={deleteBusy}>
-                    {deleteBusy ? 'Deleting...' : 'Confirm delete'}
-                  </Button>
-                </>
-              ) : (
-                <Button variant="danger" className="min-h-9 px-2" onClick={handleDelete} aria-label="Delete MRF" title="Delete">
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </Button>
-              )
-            ) : null}
-          </div>
-        </div>
+              <Button variant="danger" className="min-h-9 px-3" onClick={handleDelete} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting...' : 'Confirm delete'}
+              </Button>
+            </>
+          ) : (
+            <Button variant="danger" className="min-h-9 px-2" onClick={handleDelete} aria-label="Delete MRF" title="Delete">
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </Button>
+          )
+        ) : null}
+      </div>
+    </div>
+  )
+
+  const lineItemsBlock = (
+    <MRFLineItemsTable
+      mrfId={row.id}
+      siteId={row.site}
+      parentMrf={row}
+      siteOptions={siteOptions}
+      readinessLineItems={readiness?.line_items}
+      onChanged={handleLineItemsChanged}
+      openCreateSignal={lineItemsOpenCreate}
+      onOpenCreateHandled={() => setLineItemsOpenCreate(false)}
+      embedded={isClientView}
+    />
+  )
+
+  const lineItemsSection = isClientView ? (
+    <MrfSectionPanel title="Line items" tone="roles">
+      {lineItemsBlock}
+    </MrfSectionPanel>
+  ) : (
+    lineItemsBlock
+  )
+
+  const sharedDrawers = (
+    <>
+      <WorkflowConfigCheckDrawer
+        open={configDrawerOpen}
+        onClose={() => setConfigDrawerOpen(false)}
+        loading={configBusy}
+        errorMessage={configError}
+        data={configData}
+      />
+
+      <WorkflowReassignDrawer
+        open={reassignOpen}
+        onClose={() => setReassignOpen(false)}
+        instanceId={row.workflow_instance_id ?? null}
+        stepId={row.workflow_current_step_id ?? null}
+        onSuccess={() => reloadMrfAndWorkflow()}
+      />
+
+      {drawerOpen ? (
+        <MRFCreateWorkspaceDrawer
+          open={drawerOpen}
+          initialMRF={row}
+          onClose={closeDrawer}
+          onFinished={() => {
+            void reloadMrfAndWorkflow()
+          }}
+          siteOptions={siteOptions}
+          departmentOptions={departmentOptions}
+          departmentsLoading={departmentsLoading}
+          departmentsError={departmentsError}
+          lookupError={sitesError}
+          canReadBudget={canReadBudget}
+        />
+      ) : null}
+    </>
+  )
+
+  if (isClientView) {
+    return (
+      <div className="w-full space-y-5">
+        {pageHeader}
+        {deleteError ? <ErrorState message={deleteError} /> : null}
+
+        <MRFClientDetailOverview
+          row={row}
+          siteLabel={siteLabel}
+          lineItems={detailLineItems}
+          readinessLineItems={readiness?.line_items}
+        />
+
+        {lineItemsSection}
+
+        <MRFClientDetailApproval
+          row={row}
+          readiness={readiness}
+          readinessLoading={readinessLoading}
+          readinessError={readinessError}
+          isWorkflowNotStarted={isWorkflowNotStarted}
+          isReadyForApproval={isReadyForApproval}
+          showApprovalWorkflow={showApprovalWorkflow}
+          canWorkflowStart={canWorkflowStart}
+          canWorkflowRead={canWorkflowRead}
+          canWorkflowApprove={canWorkflowApprove}
+          canWorkflowReject={canWorkflowReject}
+          canWorkflowReassign={canWorkflowReassign}
+          canConfigCheck={canConfigCheck}
+          availableRoutes={availableRoutes}
+          routesLoading={routesLoading}
+          routesError={routesError}
+          selectedRouteId={selectedRouteId}
+          onRouteChange={(id) => {
+            setSelectedRouteId(id)
+            setStartInlineError(null)
+          }}
+          startBusy={startBusy}
+          startInlineError={startInlineError}
+          startDisabledByRoutes={startDisabledByRoutes}
+          startDisabledByReadiness={startDisabledByReadiness}
+          configCheck={inlineConfigCheck}
+          configLoading={inlineConfigLoading}
+          configError={inlineConfigError}
+          onCheckConfig={() => void handleCheckConfig()}
+          onStartWorkflow={() => void handleStartWorkflow()}
+          wfInstance={wfInstance}
+          wfInstanceLoading={wfInstanceLoading}
+          wfInstanceError={wfInstanceError}
+          onReassign={() => setReassignOpen(true)}
+          onWorkflowActionSuccess={reloadMrfAndWorkflow}
+          meId={me?.id}
+          isSuperuser={!!me?.is_superuser}
+        />
+
+        {sharedDrawers}
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full space-y-6">
+      <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
+        {pageHeader}
         {deleteError ? (
           <div className="mt-3">
             <ErrorState message={deleteError} />
@@ -555,16 +771,7 @@ export function MRFDetailPage() {
         </div>
       </div>
 
-      <MRFLineItemsTable
-        mrfId={row.id}
-        siteId={row.site}
-        parentMrf={row}
-        siteOptions={siteOptions}
-        readinessLineItems={readiness?.line_items}
-        onChanged={handleLineItemsChanged}
-        openCreateSignal={lineItemsOpenCreate}
-        onOpenCreateHandled={() => setLineItemsOpenCreate(false)}
-      />
+      {lineItemsSection}
 
       <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
         <p className="text-sm font-semibold text-app-text">Approval workflow</p>
@@ -654,10 +861,13 @@ export function MRFDetailPage() {
 
         {row.workflow_instance_id != null && row.workflow_instance_id > 0 && canWorkflowRead ? (
           <div className="mt-6 border-t border-app-border pt-4">
-            <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Instance & history</p>
-            <div className="mt-3">
-              <WorkflowTimeline instance={wfInstance} loading={wfInstanceLoading} errorMessage={wfInstanceError} />
-            </div>
+            <WorkflowTimeline
+              instance={wfInstance}
+              loading={wfInstanceLoading}
+              errorMessage={wfInstanceError}
+              currentStepId={row.workflow_current_step_id ?? null}
+              layout="stacked"
+            />
           </div>
         ) : canWorkflowRead ? null : (
           <p className="mt-4 text-xs text-app-subtle">Workflow instance details require the workflow.read capability.</p>
@@ -683,38 +893,7 @@ export function MRFDetailPage() {
         ) : null}
       </section>
 
-      <WorkflowConfigCheckDrawer
-        open={configDrawerOpen}
-        onClose={() => setConfigDrawerOpen(false)}
-        loading={configBusy}
-        errorMessage={configError}
-        data={configData}
-      />
-
-      <WorkflowReassignDrawer
-        open={reassignOpen}
-        onClose={() => setReassignOpen(false)}
-        instanceId={row.workflow_instance_id ?? null}
-        stepId={row.workflow_current_step_id ?? null}
-        onSuccess={() => reloadMrfAndWorkflow()}
-      />
-
-      {drawerOpen ? (
-        <MRFCreateWorkspaceDrawer
-          open={drawerOpen}
-          initialMRF={row}
-          onClose={closeDrawer}
-          onFinished={() => {
-            void reloadMrfAndWorkflow()
-          }}
-          siteOptions={siteOptions}
-          departmentOptions={departmentOptions}
-          departmentsLoading={departmentsLoading}
-          departmentsError={departmentsError}
-          lookupError={sitesError}
-          canReadBudget={canReadBudget}
-        />
-      ) : null}
+      {sharedDrawers}
     </div>
   )
 }

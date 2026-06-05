@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { CheckCircle2, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -12,7 +12,12 @@ import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
 import { ErrorState } from '@/components/ui/ErrorState'
+import {
+  MRFClientRequestForm,
+  type MRFClientRequestFormHandle,
+} from '@/features/mrf/MRFClientRequestForm'
 import { MRFForm, mrfFormValuesToWritePayload, type MRFFormValues, type SiteOption } from '@/features/mrf/MRFForm'
+import { useClientMrfWorkspace } from '@/features/mrf/mrfClientMode'
 import { MRFLineItemsTable } from '@/features/mrf/MRFLineItemsTable'
 import { MRFReadinessPanel } from '@/features/mrf/MRFReadinessPanel'
 import { MRFStatusBadge } from '@/features/mrf/MRFStatusBadge'
@@ -64,9 +69,17 @@ export function MRFCreateWorkspaceDrawer({
   const navigate = useNavigate()
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
   const canWorkflowStart = hasAnyCapability(meCaps, [CAP.WORKFLOW_START])
+  const isClientWorkspace = useClientMrfWorkspace(initialMRF)
+  const clientFormRef = useRef<MRFClientRequestFormHandle>(null)
+  const [clientBusyMode, setClientBusyMode] = useState<'idle' | 'saving' | 'sending'>('idle')
+  const [clientSubmitBlocked, setClientSubmitBlocked] = useState(false)
 
   const [currentStep, setCurrentStep] = useState<WorkspaceStep>('request')
   const [createdMrf, setCreatedMrf] = useState<MRFRow | null>(null)
+
+  const clientWorkflowStarted =
+    Boolean(initialMRF?.workflow_status && initialMRF.workflow_status !== 'not_started') ||
+    Boolean(createdMrf?.workflow_status && createdMrf.workflow_status !== 'not_started')
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -107,6 +120,8 @@ export function MRFCreateWorkspaceDrawer({
     setStartBusy(false)
     setStartError(null)
     setWorkflowDone(false)
+    setClientBusyMode('idle')
+    setClientSubmitBlocked(false)
   }, [open, initialMRF?.id])
 
   const siteForMrf = useMemo(
@@ -325,12 +340,16 @@ export function MRFCreateWorkspaceDrawer({
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-panel border border-app-border bg-app-muted p-3 text-sm">
         <span className="font-mono font-semibold text-app-text">MRF #{createdMrf.id}</span>
         <MRFStatusBadge status={createdMrf.status} />
-        {createdMrf.required_department_name ? (
+        {createdMrf.requested_by_type !== 'client' && createdMrf.required_department_name ? (
           <span className="text-xs text-app-secondary">Dept: {createdMrf.required_department_name}</span>
         ) : null}
-        <span className="text-xs text-app-subtle">
-          {createdMrf.billing_type} · {createdMrf.mrf_type}
-        </span>
+        {createdMrf.requested_by_type !== 'client' ? (
+          <span className="text-xs text-app-subtle">
+            {createdMrf.billing_type} · {createdMrf.mrf_type}
+          </span>
+        ) : (
+          <span className="text-xs text-app-subtle">Client manpower request</span>
+        )}
         <button
           type="button"
           className="ml-auto text-xs font-medium text-brand-600 hover:underline"
@@ -552,6 +571,65 @@ export function MRFCreateWorkspaceDrawer({
         )
       }
     }
+  }
+
+  if (isClientWorkspace) {
+    const showSubmitForApproval = canWorkflowStart && !clientWorkflowStarted
+
+    return (
+      <Drawer
+        open={open}
+        title={isEditMode ? 'Edit manpower request' : 'New manpower request'}
+        description="One scrollable form — site, roles, dates, and approval."
+        onClose={onClose}
+        panelClassName="max-w-[780px]"
+        footer={
+          <div className="flex flex-col gap-2 border-t border-app-border/60 bg-app-muted/20 pt-1 sm:flex-row sm:flex-wrap sm:justify-end">
+            <Button variant="secondary" onClick={onClose} disabled={formSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={formSubmitting || !!lookupError}
+              onClick={() => void clientFormRef.current?.saveDraft()}
+            >
+              {clientBusyMode === 'saving' ? 'Saving…' : 'Save draft'}
+            </Button>
+            {showSubmitForApproval ? (
+              <Button
+                disabled={formSubmitting || !!lookupError || clientSubmitBlocked}
+                onClick={() => void clientFormRef.current?.submitForApproval()}
+              >
+                {clientBusyMode === 'sending' ? 'Sending…' : 'Submit for approval'}
+              </Button>
+            ) : null}
+          </div>
+        }
+      >
+        <MRFClientRequestForm
+          ref={clientFormRef}
+          initialMRF={initialMRF ?? createdMrf}
+          siteOptions={siteOptions}
+          lookupError={lookupError}
+          canWorkflowStart={canWorkflowStart}
+          onSubmittingChange={setFormSubmitting}
+          onBusyModeChange={setClientBusyMode}
+          onSubmitBlockedChange={setClientSubmitBlocked}
+          onSaved={(mrf) => {
+            setCreatedMrf(mrf)
+            setFormError(null)
+            onFinished?.()
+            onClose()
+          }}
+          onSubmittedForApproval={(mrf) => {
+            setCreatedMrf(mrf)
+            setFormError(null)
+            onFinished?.()
+            onClose()
+          }}
+        />
+      </Drawer>
+    )
   }
 
   return (

@@ -251,7 +251,7 @@ export function MRFLineItemForm({
     if (initial && values.site_role_requirement === String(initial.site_role_requirement ?? '')) {
       return availableHeadcountForEdit(initial)
     }
-    return selectedSrr?.approved_headcount ?? null
+    return selectedSrr?.remaining_headcount ?? selectedSrr?.approved_headcount ?? null
   }, [initial, selectedSrr, values.site_role_requirement])
 
   const headcountError = useMemo(() => {

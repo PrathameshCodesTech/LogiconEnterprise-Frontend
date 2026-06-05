@@ -254,15 +254,19 @@ export type ProposalVersionWriteInput = {
 export interface ProposalBudgetLine {
   id: number
   proposal_version: number
-  job_role?: number | null
-  job_role_name?: string | null
   site?: number | null
   site_name?: string | null
+  role_requirement?: number | null
+  service_category?: string
+  job_role?: number | null
+  job_role_name?: string | null
+  description?: string
   manpower_count?: number | null
   unit_cost?: string | null
   total_cost?: string | null
-  is_manual_override?: boolean
   remarks?: string
+  sort_order?: number
+  is_manual_override?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -270,14 +274,18 @@ export interface ProposalBudgetLine {
 export interface ProposalBreakupLine {
   id: number
   proposal_version: number
-  component_code?: string
+  site?: number | null
+  site_name?: string | null
+  role_requirement?: number | null
+  job_role?: number | null
+  job_role_name?: string | null
   component_name?: string
   component_type?: string
   percentage?: string | null
-  sort_order?: number
-  budget_line?: number | null
   amount?: string | null
   remarks?: string
+  sort_order?: number
+  is_manual_override?: boolean
   created_at?: string
   updated_at?: string
 }

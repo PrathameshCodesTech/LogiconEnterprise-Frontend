@@ -45,6 +45,7 @@ export function MRFLineItemsTable({
   onChanged,
   openCreateSignal,
   onOpenCreateHandled,
+  embedded = false,
 }: {
   mrfId: number
   siteId: number
@@ -54,6 +55,8 @@ export function MRFLineItemsTable({
   onChanged?: () => void
   openCreateSignal?: boolean
   onOpenCreateHandled?: () => void
+  /** Drop outer card chrome when wrapped in a parent section panel. */
+  embedded?: boolean
 }) {
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
   const canWrite = hasAnyCapability(meCaps, [CAP.MRF_UPDATE])
@@ -73,7 +76,8 @@ export function MRFLineItemsTable({
     [jobRoles],
   )
   const isBillable = parentMrf.billing_type === 'billable'
-  const billableMissingDepartment = isBillable && !parentMrf.required_department
+  const isClientMrf = parentMrf.requested_by_type === 'client'
+  const billableMissingDepartment = isBillable && !isClientMrf && !parentMrf.required_department
   const wageOptions: Option[] = useMemo(
     () => wageCategories.map((w) => ({ id: w.id, label: `${w.name} (${w.code})` })),
     [wageCategories],
@@ -122,7 +126,7 @@ export function MRFLineItemsTable({
         billing_type: billingType,
         page: 1,
       }
-      if (isBillable && parentMrf.required_department) {
+      if (isBillable && !isClientMrf && parentMrf.required_department) {
         Object.assign(srrParams, { department: parentMrf.required_department })
       }
 
@@ -146,7 +150,7 @@ export function MRFLineItemsTable({
     void refresh()
     void loadLookups()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrfId, siteId, parentMrf.required_department, parentMrf.billing_type])
+  }, [mrfId, siteId, parentMrf.required_department, parentMrf.billing_type, isClientMrf])
 
   useEffect(() => {
     if (openCreateSignal) {
@@ -195,27 +199,41 @@ export function MRFLineItemsTable({
     }
   }
 
-  async function handleDelete(row: MRFLineItemRow) {
+  const [deleteTarget, setDeleteTarget] = useState<MRFLineItemRow | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  function requestDelete(row: MRFLineItemRow) {
     if (!canWrite) return
-    const ok = window.confirm('Delete this line item? This cannot be undone.')
-    if (!ok) return
+    setDeleteError(null)
+    setDeleteTarget(row)
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return
+    setDeleteBusy(true)
+    setDeleteError(null)
     try {
-      await deleteMRFLineItem(row.id)
+      await deleteMRFLineItem(deleteTarget.id)
+      setDeleteTarget(null)
       await refresh()
       onChanged?.()
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Delete failed').message)
+      setDeleteError(parseApiError(e, 'Delete failed').message)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
-  return (
-    <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-      <div className="flex items-start justify-between gap-3">
+  const headerBlock = (
+    <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-app-text">Line items</p>
-          <p className="text-xs text-app-secondary">
+          {!embedded ? <p className="text-sm font-semibold text-app-text">Line items</p> : null}
+          <p className={embedded ? 'text-xs text-app-secondary' : 'text-xs text-app-secondary'}>
             {isBillable
-              ? 'Select approved site role requirements for this site and required department.'
+              ? isClientMrf
+                ? 'Select approved site role requirements for this site.'
+                : 'Select approved site role requirements for this site and required department.'
               : 'Job role headcount and wage/budget details.'}
           </p>
         </div>
@@ -231,6 +249,11 @@ export function MRFLineItemsTable({
           </Button>
         ) : null}
       </div>
+  )
+
+  const mainContent = (
+    <>
+      {headerBlock}
 
       {billableMissingDepartment ? (
         <p className="mt-3 text-xs text-status-warning">
@@ -275,7 +298,9 @@ export function MRFLineItemsTable({
             <TBody>
               {rows.map((r) => {
                 const ri = readinessByLineId.get(r.id)
-                const srrInfo = formatLineItemSrrSummary(r)
+                const srrInfo = formatLineItemSrrSummary(r, {
+                  includeDepartment: !isClientMrf,
+                })
                 const billableImpact = isBillable ? formatLineItemBillableImpact(r, ri) : null
                 return (
                 <TR key={r.id}>
@@ -346,7 +371,7 @@ export function MRFLineItemsTable({
                         </Button>
                       ) : null}
                       {canWrite ? (
-                        <Button variant="danger" className="min-h-9 px-3" onClick={() => handleDelete(r)}>
+                        <Button variant="danger" className="min-h-9 px-3" onClick={() => requestDelete(r)}>
                           Delete
                         </Button>
                       ) : null}
@@ -356,6 +381,18 @@ export function MRFLineItemsTable({
               )})}
             </TBody>
           </Table>
+        </div>
+      )}
+    </>
+  )
+
+  return (
+    <>
+      {embedded ? (
+        mainContent
+      ) : (
+        <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
+          {mainContent}
         </div>
       )}
 
@@ -390,6 +427,29 @@ export function MRFLineItemsTable({
           lookupError={lookupError}
         />
       </Drawer>
-    </div>
+
+      <Drawer
+        open={deleteTarget != null}
+        title="Delete line item"
+        description={
+          deleteTarget
+            ? `Remove this line item for ${deleteTarget.site_role_requirement_label ?? 'the role'}? This cannot be undone.`
+            : undefined
+        }
+        onClose={() => !deleteBusy && setDeleteTarget(null)}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" disabled={deleteBusy} onClick={() => void handleConfirmDelete()}>
+              {deleteBusy ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        }
+      >
+        {deleteError ? <ErrorState message={deleteError} /> : null}
+      </Drawer>
+    </>
   )
 }

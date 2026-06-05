@@ -20,12 +20,14 @@ export function HiringPipelineBoard({
   canMove,
   onMove,
   onDropApplication,
+  highlightedAppId,
 }: {
   stages: PipelineStageRow[]
   applications: HiringApplicationRow[]
   canMove: boolean
   onMove: (app: HiringApplicationRow) => void
   onDropApplication: (appId: number, targetStageId: number) => void
+  highlightedAppId?: number | null
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -172,6 +174,7 @@ export function HiringPipelineBoard({
               canMove={canMove}
               onMove={onMove}
               onDropApplication={onDropApplication}
+              highlightedAppId={highlightedAppId}
             />
           ))}
         </div>

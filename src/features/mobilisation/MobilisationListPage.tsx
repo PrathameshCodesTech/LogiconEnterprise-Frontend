@@ -162,7 +162,7 @@ export function MobilisationListPage() {
 
       <div>
         <h2 className="text-lg font-semibold text-app-text">Mobilisation</h2>
-        <p className="text-sm text-app-secondary">Post-win setup for departments and users, sourced from won sales proposals.</p>
+        <p className="text-sm text-app-secondary">Post-win client user setup for portal access and MRFs, sourced from won sales proposals.</p>
       </div>
 
       <div className="space-y-3">

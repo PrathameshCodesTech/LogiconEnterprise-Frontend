@@ -19,7 +19,7 @@ export function ClientOverviewWidget({
   const { client_count, site_count, department_count, clients, charts } = data
   const visibleClients = clients.slice(0, 5)
   const sitesByClient = charts?.sites_by_client ?? []
-  const departmentsByClient = charts?.departments_by_client ?? []
+  const departmentsByClient = compactForClientAudience ? [] : charts?.departments_by_client ?? []
 
   const sitesTitle = compactForClientAudience && sitesByClient.length === 1
     ? 'Sites'
@@ -32,14 +32,16 @@ export function ClientOverviewWidget({
     <DashboardWidgetCard
       id="client-overview"
       title="Client overview"
-      description="Clients, sites, and departments in your scope."
+      description={
+        compactForClientAudience ? 'Clients and sites in your scope.' : 'Clients, sites, and departments in your scope.'
+      }
       action={<WidgetDrilldownAction label="View clients" fallbackTo="/clients" />}
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
+        <div className={compactForClientAudience ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-3 gap-3'}>
           <MetricTile label="Clients" value={formatCount(client_count)} />
           <MetricTile label="Sites" value={formatCount(site_count)} />
-          <MetricTile label="Departments" value={formatCount(department_count)} />
+          {!compactForClientAudience ? <MetricTile label="Departments" value={formatCount(department_count)} /> : null}
         </div>
 
         {sitesByClient.length > 0 ? (

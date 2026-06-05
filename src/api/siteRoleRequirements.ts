@@ -14,6 +14,8 @@ export interface SiteRoleRequirementRow {
   job_role_name: string | null
   job_role_code: string | null
   approved_headcount: number
+  allocated_headcount?: number | null
+  remaining_headcount?: number | null
   billing_type: BillingType
   billing_rate: string | null
   wage_min: string | null
@@ -97,6 +99,5 @@ export async function updateSiteRoleRequirement(id: number, payload: Partial<Sit
 export async function deactivateSiteRoleRequirement(id: number) {
   await api.delete(`/api/sites/role-requirements/${id}/`)
 }
-
 
 

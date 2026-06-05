@@ -57,6 +57,12 @@ export interface MRFLineItemRow {
   commercial_overridden_at?: string | null
   effective_wage_min?: string | null
   effective_wage_max?: string | null
+  approved_billing_rate?: string | null
+  requested_billing_rate?: string | null
+  billing_rate_variance?: string | null
+  is_over_approved_billing_rate?: boolean
+  line_approved_amount?: string | null
+  line_requested_amount?: string | null
 }
 
 export type MRFWorkflowStatus = 'not_started' | 'active' | 'approved' | 'rejected' | 'cancelled' | string

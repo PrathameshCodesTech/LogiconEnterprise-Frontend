@@ -9,12 +9,14 @@ export function HiringPipelineColumn({
   canMove,
   onMove,
   onDropApplication,
+  highlightedAppId,
 }: {
   stage: PipelineStageRow
   applications: HiringApplicationRow[]
   canMove: boolean
   onMove: (app: HiringApplicationRow) => void
   onDropApplication: (appId: number, targetStageId: number) => void
+  highlightedAppId?: number | null
 }) {
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -80,6 +82,7 @@ export function HiringPipelineColumn({
                 app={app}
                 canMove={canMove}
                 onMove={onMove}
+                highlighted={highlightedAppId != null && app.id === highlightedAppId}
               />
             ))
           )}

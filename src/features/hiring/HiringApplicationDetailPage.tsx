@@ -3,7 +3,10 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   convertApplicationToDeployment,
   getHiringApplication,
+  getInterviewPlan,
   listCandidateMatchResults,
+  listInterviewFeedback,
+  listInterviews,
   listOffers,
   listPipelineStages,
   moveHiringApplicationStage,
@@ -21,6 +24,8 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { OfferFormDrawer } from '@/features/hiring/OfferFormDrawer'
+import { HiringApplicationJourney } from '@/features/hiring/HiringJourney'
+import { InterviewPanel } from '@/features/hiring/InterviewPanel'
 import { ResumeFileActions } from '@/features/talent/ResumeFileActions'
 import {
   hiringApplicationStatusLabel,
@@ -31,6 +36,9 @@ import type {
   CandidateMatchResultRow,
   HiringApplicationRow,
   HiringDeploymentConversionResult,
+  InterviewFeedbackRow,
+  InterviewPlanRow,
+  InterviewRow,
   OfferRow,
   PipelineStageRow,
 } from '@/features/hiring/types'
@@ -60,6 +68,9 @@ export function HiringApplicationDetailPage() {
     CAP.DEPLOYMENT_MANAGE,
     CAP.SITE_DEPLOYMENT_CREATE,
   ])
+  const canInterviewRead = hasAnyCapability(meCaps, [CAP.INTERVIEW_READ, CAP.INTERVIEW_CREATE, CAP.INTERVIEW_MANAGE])
+  const canInterviewCreate = hasAnyCapability(meCaps, [CAP.INTERVIEW_CREATE])
+  const canInterviewManage = hasAnyCapability(meCaps, [CAP.INTERVIEW_MANAGE])
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +79,10 @@ export function HiringApplicationDetailPage() {
   const [matches, setMatches] = useState<CandidateMatchResultRow[]>([])
   const [resumes, setResumes] = useState<ResumeRow[]>([])
   const [offer, setOffer] = useState<OfferRow | null>(null)
+  const [interviews, setInterviews] = useState<InterviewRow[]>([])
+  const [feedbacks, setFeedbacks] = useState<InterviewFeedbackRow[]>([])
+  const [interviewPlan, setInterviewPlan] = useState<InterviewPlanRow | null>(null)
+  const [interviewsLoading, setInterviewsLoading] = useState(false)
   const [offerDrawerOpen, setOfferDrawerOpen] = useState(false)
   const [convertDrawerOpen, setConvertDrawerOpen] = useState(false)
   const [convertResult, setConvertResult] = useState<{
@@ -104,7 +119,44 @@ export function HiringApplicationDetailPage() {
     } catch {
       setOffer(null)
     }
+    if (app.interview_plan != null) {
+      try {
+        const plan = await getInterviewPlan(app.interview_plan)
+        setInterviewPlan(plan)
+      } catch {
+        setInterviewPlan(null)
+      }
+    } else {
+      setInterviewPlan(null)
+    }
   }, [appId])
+
+  const loadInterviews = useCallback(async () => {
+    if (!Number.isFinite(appId) || appId < 1) return
+    if (!canInterviewRead) {
+      setInterviews([])
+      setFeedbacks([])
+      return
+    }
+    setInterviewsLoading(true)
+    try {
+      const ivRes = await listInterviews({ hiring_application: appId })
+      setInterviews(ivRes.items)
+      if (ivRes.items.length > 0) {
+        const fbResults = await Promise.all(
+          ivRes.items.map((iv) => listInterviewFeedback({ interview: iv.id }).catch(() => ({ items: [] }))),
+        )
+        setFeedbacks(fbResults.flatMap((r) => r.items))
+      } else {
+        setFeedbacks([])
+      }
+    } catch {
+      setInterviews([])
+      setFeedbacks([])
+    } finally {
+      setInterviewsLoading(false)
+    }
+  }, [appId, canInterviewRead])
 
   useEffect(() => {
     if (!Number.isFinite(appId) || appId < 1) {
@@ -118,6 +170,7 @@ export function HiringApplicationDetailPage() {
       setError(null)
       try {
         await loadApplication()
+        await loadInterviews()
       } catch (e: unknown) {
         if (!cancelled) setError(parseApiError(e, 'Could not load application').message)
       } finally {
@@ -127,7 +180,7 @@ export function HiringApplicationDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [appId, loadApplication])
+  }, [appId, loadApplication, loadInterviews])
 
   useEffect(() => {
     if (autoOpenedConvertRef.current) return
@@ -178,6 +231,10 @@ export function HiringApplicationDetailPage() {
 
   const topMatch = matches[0]
 
+  const clientApproved =
+    row.client_decision === 'approved' ||
+    ['selected', 'offer_released', 'offer_accepted', 'offer_declined', 'deployed'].includes(row.status)
+
   return (
     <div className="w-full space-y-6">
       <div className="flex flex-col gap-2 border-b border-app-border pb-4 sm:flex-row sm:items-start sm:justify-between">
@@ -201,16 +258,26 @@ export function HiringApplicationDetailPage() {
         </Link>
       </div>
 
+      <HiringApplicationJourney app={row} />
+
       <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
         <p className="text-sm font-semibold text-app-text">Demand</p>
         <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
           <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">MRF</dt>
-            <dd className="font-mono text-xs">#{row.mrf}</dd>
+            <dt className="text-app-subtle">Client</dt>
+            <dd className="text-app-text">{row.client_name?.trim() || '—'}</dd>
           </div>
           <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">Line item</dt>
-            <dd className="font-mono text-xs">#{row.mrf_line_item}</dd>
+            <dt className="text-app-subtle">Site</dt>
+            <dd className="text-app-text">{row.site_name?.trim() || '—'}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-app-subtle">Job role</dt>
+            <dd className="text-app-text">{row.job_role_name?.trim() || '—'}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-app-subtle">Request</dt>
+            <dd className="font-mono text-xs text-app-subtle">#{row.mrf}</dd>
           </div>
         </dl>
       </section>
@@ -273,20 +340,42 @@ export function HiringApplicationDetailPage() {
         )}
       </section>
 
+      {canInterviewRead ? (
+        <InterviewPanel
+          app={row}
+          plan={interviewPlan}
+          interviews={interviews}
+          feedbacks={feedbacks}
+          loading={interviewsLoading}
+          canCreate={canInterviewCreate}
+          canManage={canInterviewManage}
+          onChanged={async () => {
+            await loadApplication()
+            await loadInterviews()
+          }}
+        />
+      ) : null}
+
       {canOfferRead ? (
         <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-app-text">Offer</p>
-            <Button
-              type="button"
-              variant="secondary"
-              className="min-h-7 px-3 text-xs"
-              onClick={() => setOfferDrawerOpen(true)}
-            >
-              {offer ? 'Manage offer' : 'Create offer'}
-            </Button>
+            {offer || row.status === 'selected' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-7 px-3 text-xs"
+                onClick={() => setOfferDrawerOpen(true)}
+              >
+                {offer ? 'Manage offer' : 'Create offer'}
+              </Button>
+            ) : null}
           </div>
-          {offer ? (
+          {!offer && !clientApproved ? (
+            <p className="mt-2 text-xs text-app-secondary">
+              Client approval is required before creating an offer.
+            </p>
+          ) : offer ? (
             <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
               <div className="flex justify-between gap-3">
                 <dt className="text-app-subtle">Status</dt>
@@ -335,8 +424,10 @@ export function HiringApplicationDetailPage() {
 
       {canMove ? (
         <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-          <p className="text-sm font-semibold text-app-text">Move candidate</p>
-          <p className="mt-1 text-xs text-app-secondary">Update pipeline stage and/or hiring status. At least one field is required.</p>
+          <p className="text-sm font-semibold text-app-text">Admin correction</p>
+          <p className="mt-1 text-xs text-app-secondary">
+            Manual stage/status override for corrections only. Normal movement happens through the interview pipeline (apply plan, schedule rounds, submit feedback, create offer).
+          </p>
           {moveError ? (
             <div className="mt-3">
               <ErrorState message={moveError} />
@@ -393,6 +484,7 @@ export function HiringApplicationDetailPage() {
             offer_joining_date: updated.joining_date ?? null,
           } : prev)
           setOfferDrawerOpen(false)
+          void loadApplication()
         }}
       />
 

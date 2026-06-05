@@ -21,6 +21,7 @@ import {
   finalizeMobilisationDirectly,
   getMobilisationSalesContext,
   getMobilisationSetupRequest,
+  listMobilisationUsers,
   markMobilisationSetupCompleted,
 } from '@/api/mobilisation'
 import {
@@ -52,22 +53,21 @@ import {
   type MobilisationSalesContext,
   type MobilisationSetupRequest,
 } from '@/features/mobilisation/types'
-import { SetupBuilderPanel } from '@/features/mobilisation/components/SetupBuilderPanel'
+import { ClientUsersPanel } from '@/features/mobilisation/components/ClientUsersPanel'
 import { cn } from '@/lib/cn'
 import { listUsers, type UserRow } from '@/api/users'
 
-type MobilisationTab = 'overview' | 'setup' | 'approval'
+type MobilisationTab = 'overview' | 'users' | 'approval'
 
 const TABS: { id: MobilisationTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'setup', label: 'Setup Builder' },
+  { id: 'users', label: 'Client Users' },
   { id: 'approval', label: 'Approval / Finalization' },
 ]
 
 function normalizeTab(raw: string | null): MobilisationTab {
-  if (raw === 'overview' || raw === 'setup' || raw === 'approval') return raw
-  // Redirect old tabs to new setup tab
-  if (raw === 'departments' || raw === 'users') return 'setup'
+  if (raw === 'overview' || raw === 'users' || raw === 'approval') return raw
+  if (raw === 'setup' || raw === 'departments') return 'users'
   return 'overview'
 }
 
@@ -128,10 +128,19 @@ function formatIndianCurrency(value: string | number | null | undefined): string
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; onNavigateTab: (tab: MobilisationTab) => void }) {
+function OverviewTab({
+  row,
+  onNavigateTab,
+  usersRefreshKey,
+}: {
+  row: MobilisationSetupRequest
+  onNavigateTab: (tab: MobilisationTab) => void
+  usersRefreshKey: number
+}) {
   const [salesContext, setSalesContext] = useState<MobilisationSalesContext | null>(null)
   const [contextLoading, setContextLoading] = useState(true)
   const [contextError, setContextError] = useState<string | null>(null)
+  const [activeProposedUsers, setActiveProposedUsers] = useState(0)
 
   useEffect(() => {
     async function loadContext() {
@@ -148,6 +157,22 @@ function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; on
     }
     void loadContext()
   }, [row.id])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await listMobilisationUsers(row.id)
+        if (cancelled) return
+        setActiveProposedUsers(res.items.filter((u) => u.is_active).length)
+      } catch {
+        if (!cancelled) setActiveProposedUsers(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [row.id, usersRefreshKey])
 
   // Check if this mobilisation has sales source
   const hasSalesSource = row.source_sales_lead != null || row.source_proposal_version != null
@@ -169,7 +194,7 @@ function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; on
               <h3 className="text-lg font-semibold text-app-text">Manual Mobilisation</h3>
               <p className="mt-1 text-sm text-app-secondary">
                 This mobilisation request was not created from a sales proposal.
-                Setup departments and users manually using the tabs below.
+                Add client portal users in the Client Users tab before finalization.
               </p>
             </div>
           </div>
@@ -224,7 +249,7 @@ function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; on
   const proposal = ctx?.proposal
   const sites = ctx?.sites ?? []
   const proposalVersions = ctx?.proposal_versions ?? []
-  const readiness = ctx?.readiness
+  const readyForFinalization = activeProposedUsers >= 1
 
   // Calculate totals
   const totalHeadcount = sites.reduce((sum, s) => sum + s.headcount, 0)
@@ -367,7 +392,10 @@ function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; on
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
               <Building2 className="h-4 w-4 text-brand-600" />
             </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Sites to Mobilise</h3>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Sites &amp; role requirements</h3>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+              Already created from sales conversion
+            </span>
             <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
               {sites.length} {sites.length === 1 ? 'site' : 'sites'} · {totalHeadcount} people
             </span>
@@ -432,79 +460,71 @@ function OverviewTab({ row, onNavigateTab }: { row: MobilisationSetupRequest; on
       ) : null}
 
       {/* Setup Readiness */}
-      {readiness ? (
-        <section>
-          <div className="mb-4 flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
-              <ClipboardCheck className="h-4 w-4 text-brand-600" />
+      <section>
+        <div className="mb-4 flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+            <ClipboardCheck className="h-4 w-4 text-brand-600" />
+          </div>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Setup Readiness</h3>
+          {readyForFinalization ? (
+            <Badge variant="success" className="text-xs">
+              Ready
+            </Badge>
+          ) : (
+            <Badge variant="attention" className="text-xs">
+              Setup needed
+            </Badge>
+          )}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/10">
+                  <Users className="h-5 w-5 text-brand-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-app-text">Client users configured</p>
+                  <p className="text-xs text-app-subtle">
+                    {activeProposedUsers} active user{activeProposedUsers !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              {activeProposedUsers >= 1 ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('users')}
+                  className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-600"
+                >
+                  Add
+                </button>
+              )}
             </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Setup Readiness</h3>
-            {readiness.ready_to_finalize ? (
-              <Badge variant="success" className="text-xs">Ready</Badge>
-            ) : (
-              <Badge variant="attention" className="text-xs">Setup Needed</Badge>
-            )}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {/* Departments */}
-            <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/10">
-                    <Building2 className="h-5 w-5 text-brand-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-app-text">Departments</p>
-                    <p className="text-xs text-app-subtle">
-                      {readiness.created_departments} of {readiness.expected_departments} created
-                    </p>
-                  </div>
+          <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/10">
+                  <ClipboardCheck className="h-5 w-5 text-brand-600" />
                 </div>
-                {readiness.created_departments >= readiness.expected_departments && readiness.expected_departments > 0 ? (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab('setup')}
-                    className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 transition-colors"
-                  >
-                    Add
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Users */}
-            <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/10">
-                    <Users className="h-5 w-5 text-brand-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-app-text">Users</p>
-                    <p className="text-xs text-app-subtle">
-                      {readiness.created_users} of {readiness.expected_users} created
-                    </p>
-                  </div>
+                <div>
+                  <p className="text-sm font-semibold text-app-text">Ready for finalization</p>
+                  <p className="text-xs text-app-subtle">
+                    {readyForFinalization ? 'At least one client user is active' : 'Add a client user first'}
+                  </p>
                 </div>
-                {readiness.created_users >= readiness.expected_users && readiness.expected_users > 0 ? (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab('setup')}
-                    className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 transition-colors"
-                  >
-                    Add
-                  </button>
-                )}
               </div>
+              {readyForFinalization ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              ) : null}
             </div>
           </div>
-        </section>
-      ) : null}
+        </div>
+      </section>
 
       {/* Proposal Revision History */}
       {proposalVersions.length > 1 ? (
@@ -703,7 +723,7 @@ export function MobilisationDetailPage() {
   const [opsUsersError, setOpsUsersError] = useState<string | null>(null)
   const [assignError, setAssignError] = useState<string | null>(null)
   const [assignBusy, setAssignBusy] = useState(false)
-
+  const [usersRefreshKey, setUsersRefreshKey] = useState(0)
 
   const [wfInstance, setWfInstance] = useState<WorkflowInstance | null>(null)
   const [wfInstanceLoading, setWfInstanceLoading] = useState(false)
@@ -952,6 +972,10 @@ export function MobilisationDetailPage() {
     return { instanceId, workflowStatus: resolvedStatus, stepId, stepCode, stepName, assignedUserId, assignedUserName, deptName, backendHasInstanceId: backendId != null }
   }, [row, wfInstance, rememberedInstanceId, wfInstanceLoading])
 
+  const handleClientUsersChanged = useCallback(() => {
+    setUsersRefreshKey((k) => k + 1)
+  }, [])
+
   if (loading) return <Spinner label="Loading mobilisation setup..." />
   if (error) return <ErrorState message={error} />
   if (!row) return <EmptyState title="Request not found" description="This mobilisation setup may have been removed." />
@@ -1007,29 +1031,18 @@ export function MobilisationDetailPage() {
   const approvalTab = (
     <div className="space-y-4">
       {!canFinalizeOrStartWorkflow ? (
-        <div className="rounded-panel border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-900">Operations setup must be completed before approval or finalization.</p>
-          <p className="mt-1 text-xs text-amber-800">
+        <div className="rounded-panel border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+            Operations must add at least one client user and mark setup completed before finalization.
+          </p>
+          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
             Current status: <span className="font-medium">{mobilisationStatusLabel(row.status)}</span>
           </p>
-          {setupError ? (
+          {canUpdateMobilisation && row.status === 'operations_setup' ? (
             <div className="mt-3">
-              <ErrorState message={setupError} />
-            </div>
-          ) : null}
-          {setupSuccess ? <p className="mt-3 text-sm text-status-hired">{setupSuccess}</p> : null}
-          {(row.status === 'operations_setup' || row.status === 'draft') && canUpdateMobilisation ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {row.status === 'draft' ? (
-                <Button variant="secondary" className="min-h-9" onClick={() => { setAssignOwnerOpen(true); setAssignError(null); setOpsOwner('') }}>
-                  Assign operations owner
-                </Button>
-              ) : null}
-              {row.status === 'operations_setup' ? (
-                <Button className="min-h-9" disabled={setupBusy} onClick={() => void handleMarkSetupCompleted()}>
-                  {setupBusy ? 'Saving…' : 'Mark setup completed'}
-                </Button>
-              ) : null}
+              <Button variant="secondary" className="min-h-9" onClick={() => setTab('users')}>
+                Go to Client Users
+              </Button>
             </div>
           ) : null}
         </div>
@@ -1037,7 +1050,7 @@ export function MobilisationDetailPage() {
       <div className="rounded-panel border border-app-border bg-app-surface p-4">
         <p className="text-sm font-semibold text-app-text">Direct finalization</p>
         <p className="mt-1 text-xs text-app-secondary">
-          Create the real departments and users now without approval. Use this when setup is already verified.
+          Create client portal users now without approval. Use this when client user setup is already verified.
         </p>
         {fin === 'finalized' ? (
           <p className="mt-3 text-sm font-medium text-status-success">Finalized successfully.</p>
@@ -1271,13 +1284,17 @@ export function MobilisationDetailPage() {
       </div>
 
       <div>
-        {tab === 'overview' ? <OverviewTab row={row} onNavigateTab={setTab} /> : null}
-        {tab === 'setup' ? (
-          <SetupBuilderPanel
+        {tab === 'overview' ? (
+          <OverviewTab row={row} onNavigateTab={setTab} usersRefreshKey={usersRefreshKey} />
+        ) : null}
+        {tab === 'users' ? (
+          <ClientUsersPanel
             requestId={row.id}
             isEditable={canEditSetup}
+            isFinalized={fin === 'finalized'}
             onMarkSetupCompleted={handleMarkSetupCompleted}
             markingComplete={setupBusy}
+            onUsersChanged={handleClientUsersChanged}
           />
         ) : null}
         {tab === 'approval' ? approvalTab : null}
@@ -1286,7 +1303,7 @@ export function MobilisationDetailPage() {
       <Drawer
         open={assignOwnerOpen}
         title="Assign operations owner"
-        description="This person will complete departments and client users before finalization."
+        description="This person will add client portal users and complete mobilisation setup before finalization."
         onClose={() => !assignBusy && setAssignOwnerOpen(false)}
         footer={
           <div className="flex justify-end gap-2">

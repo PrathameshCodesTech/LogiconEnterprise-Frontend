@@ -23,7 +23,9 @@ import {
   Users,
   Wallet,
 } from 'lucide-react'
-import { CAP, MASTERS_ANY } from '@/lib/capabilities'
+import { CAP, MASTERS_ANY, hasAnyCapability } from '@/lib/capabilities'
+import { isClientFacingUser } from '@/lib/userRoleMode'
+import type { MeResponse } from '@/types/api'
 
 export interface NavItem {
   path: string
@@ -156,7 +158,7 @@ export const navGroups: NavGroup[] = [
     items: [
       {
         path: '/hiring/pipeline',
-        label: 'Hiring pipeline',
+        label: 'Interview pipeline',
         icon: KanbanSquare,
         requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
       },
@@ -180,7 +182,7 @@ export const navGroups: NavGroup[] = [
       },
       {
         path: '/hiring/client-review',
-        label: 'Client review',
+        label: 'Candidate review',
         icon: ClipboardList,
         requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
       },
@@ -212,12 +214,79 @@ export const navGroups: NavGroup[] = [
   },
 ]
 
+/**
+ * Trimmed sidebar for client-facing users. Paths reuse the same routes as the
+ * internal nav so notification badge mapping (see Sidebar/MobileNav) keeps working.
+ */
+const clientPortalGroups: NavGroup[] = [
+  {
+    label: 'Account',
+    items: [
+      { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { path: '/clients', label: 'Company profile', icon: Building2, requiredCapabilities: [CAP.CLIENT_READ] },
+      { path: '/sites', label: 'Sites', icon: MapPin },
+      { path: '/site-role-requirements', label: 'Site role requirements', icon: ClipboardList },
+    ],
+  },
+  {
+    label: 'Commercials',
+    items: [
+      { path: '/budgets', label: 'Approved budgets', icon: Wallet },
+    ],
+  },
+  {
+    label: 'Workforce',
+    items: [
+      {
+        path: '/deployment/client-employees',
+        label: 'Deployed employees',
+        icon: Users,
+        requiredCapabilities: [CAP.EMPLOYEE_READ],
+      },
+    ],
+  },
+  {
+    label: 'Requests',
+    items: [
+      { path: '/mrf', label: 'MRF', icon: ClipboardList },
+      { path: '/hiring/client-review', label: 'Candidate review', icon: ClipboardList },
+    ],
+  },
+]
+
+/**
+ * Returns the sidebar groups for the current user. Client-facing users get the
+ * trimmed Portal nav; everyone else gets the capability-filtered internal nav.
+ */
+export function buildNavGroups(me: MeResponse | null | undefined): NavGroup[] {
+  const caps = me?.capabilities ?? []
+  if (isClientFacingUser(me)) {
+    return clientPortalGroups
+      .map((group) => ({
+        label: group.label,
+        items: group.items.filter((item) =>
+          item.requiredCapabilities?.length ? hasAnyCapability(caps, item.requiredCapabilities) : true,
+        ),
+      }))
+      .filter((group) => group.items.length > 0)
+  }
+  return navGroups
+    .map((group) => ({
+      label: group.label,
+      items: group.items.filter((item) =>
+        item.requiredCapabilities?.length ? hasAnyCapability(caps, item.requiredCapabilities) : true,
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
+}
+
 /** Flat list in sidebar order; used by `titleForPath` and dashboard shortcuts. */
 export const navItems: NavItem[] = navGroups.flatMap((group) => group.items)
 
 const routeTitles: Record<string, string> = Object.fromEntries(navItems.map((item) => [item.path, item.label]))
 
 routeTitles['/'] = 'Home'
+routeTitles['/deployment/client-employees'] = 'Deployed employees'
 
 export function titleForPath(pathname: string): string {
   if (routeTitles[pathname]) {
