@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, GitBranch, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, ExternalLink, GitBranch, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import {
@@ -20,7 +20,17 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { hiringApplicationStatusLabel } from '@/features/talent/talentLabels'
+import { CandidateMatchScorecard } from '@/features/hiring/CandidateMatchScorecard'
 import { HiringDemandJourney } from '@/features/hiring/HiringJourney'
+import {
+  demandRequiresClientReview,
+  demandIsInternalNonBillable,
+  hasLaneInfo,
+  hiringLaneBadgeLabel,
+  hiringLaneBadgeVariant,
+} from '@/features/hiring/hiringLaneLabels'
+import { formatMatchScore, matchStatusBadgeVariant } from '@/features/hiring/matchScoreLabels'
+import { poolRowToScorecard } from '@/features/hiring/matchResultMapper'
 import type {
   CandidatePoolResultRow,
   HiringApplicationRow,
@@ -29,23 +39,9 @@ import type {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function fmtScore(v: number | string | null | undefined): string {
-  if (v == null) return '-'
-  const n = Number(v)
-  if (!Number.isFinite(n)) return String(v)
-  return `${(n * 100).toFixed(0)}%`
-}
-
 function fmtExp(v: string | number | null | undefined): string {
   if (v == null || v === '') return '-'
   return `${v} yrs`
-}
-
-function matchVariant(s: string | null | undefined): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (!s) return 'neutral'
-  if (s === 'qualified') return 'success'
-  if (s === 'partial') return 'warning'
-  return 'danger'
 }
 
 function decisionVariant(s: string | null | undefined): 'success' | 'danger' | 'warning' | 'neutral' {
@@ -79,18 +75,40 @@ function InlineSuccess({ message }: { message: string }) {
 // ─── Demand summary header ────────────────────────────────────────────────────
 
 function DemandSummary({ demand }: { demand: HiringDemandRow }) {
+  const isInternal = demandIsInternalNonBillable(demand)
+
   return (
     <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-app-text">
-            {demand.job_role_name ?? `Role #${demand.job_role_id}`}
-          </h2>
-          <p className="mt-0.5 text-sm text-app-secondary">
-            {demand.client_name?.trim() || '—'}
-            {demand.site_name ? ` · ${demand.site_name}` : ''}
-            {demand.billing_type ? ` · ${demand.billing_type}` : ''}
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-app-text">
+              {demand.job_role_name ?? `Role #${demand.job_role_id}`}
+            </h2>
+            {hasLaneInfo(demand) ? (
+              <Badge variant={hiringLaneBadgeVariant(demand)} className="text-[10px]">
+                {hiringLaneBadgeLabel(demand)}
+              </Badge>
+            ) : null}
+          </div>
+          {isInternal ? (
+            <>
+              <p className="mt-0.5 text-sm text-app-secondary">
+                {demand.required_department_name?.trim() || 'Internal'}
+                {demand.resolved_budget_plan_name ? ` · ${demand.resolved_budget_plan_name}` : ''}
+              </p>
+              {demand.requesting_department_name ? (
+                <p className="mt-0.5 text-xs text-app-subtle">
+                  Requested by: {demand.requesting_department_name}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-0.5 text-sm text-app-secondary">
+              {demand.client_name?.trim() || '—'}
+              {demand.site_name ? ` · ${demand.site_name}` : ''}
+            </p>
+          )}
           <p className="mt-0.5 font-mono text-xs text-app-subtle">MRF #{demand.mrf_id}</p>
         </div>
         <div className="flex flex-wrap gap-4 text-center text-sm">
@@ -145,13 +163,16 @@ const BLANK_POOL_FILTERS: PoolFilters = {
 
 function CandidatePoolTab({
   demandId,
+  demand,
   canShortlist,
   onShortlisted,
 }: {
   demandId: number
+  demand: HiringDemandRow
   canShortlist: boolean
   onShortlisted: () => void
 }) {
+  const needsClientReview = demandRequiresClientReview(demand)
   const [filters, setFilters] = useState<PoolFilters>(BLANK_POOL_FILTERS)
   const [rows, setRows] = useState<CandidatePoolResultRow[]>([])
   const [count, setCount] = useState<number | undefined>()
@@ -161,6 +182,7 @@ function CandidatePoolTab({
   const [shortlistErrors, setShortlistErrors] = useState<Record<number, string>>({})
   const [shortlistSuccess, setShortlistSuccess] = useState<Record<number, boolean>>({})
   const [justShortlisted, setJustShortlisted] = useState(false)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -195,8 +217,19 @@ function CandidatePoolTab({
     setShortlistingId(cid)
     setShortlistErrors((prev) => ({ ...prev, [cid]: '' }))
     setShortlistSuccess((prev) => ({ ...prev, [cid]: false }))
+    if (row.match_result == null) {
+      setShortlistErrors((prev) => ({
+        ...prev,
+        [cid]: 'Scorecard was not saved. Refresh candidate pool and try again.',
+      }))
+      setShortlistingId(null)
+      return
+    }
     try {
-      await shortlistCandidateForDemand(demandId, { candidate: cid })
+      await shortlistCandidateForDemand(demandId, {
+        candidate: cid,
+        match_result: row.match_result,
+      })
       setShortlistSuccess((prev) => ({ ...prev, [cid]: true }))
       setJustShortlisted(true)
       onShortlisted()
@@ -217,11 +250,11 @@ function CandidatePoolTab({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2 rounded-panel border border-app-border bg-app-surface p-3 shadow-panel">
-        <FilterField label="Skills" value={filters.skills} onChange={(v) => setFilter('skills', v)} placeholder="e.g. housekeeping" />
-        <FilterField label="Location" value={filters.location} onChange={(v) => setFilter('location', v)} placeholder="City or state" />
-        <FilterField label="Min exp (yrs)" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" />
-        <FilterField label="Max exp (yrs)" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" />
-        <FilterField label="Min score (0–1)" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="e.g. 0.6" type="number" />
+        <FilterField label="Required skills" value={filters.skills} onChange={(v) => setFilter('skills', v)} placeholder="e.g. electrician" />
+        <FilterField label="Preferred location" value={filters.location} onChange={(v) => setFilter('location', v)} placeholder="City or state" />
+        <FilterField label="Minimum experience" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" />
+        <FilterField label="Maximum experience" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" />
+        <FilterField label="Minimum match score (0–100)" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="e.g. 70" type="number" />
         <div className="flex items-end gap-2 ml-auto">
           <Button
             type="button"
@@ -242,11 +275,20 @@ function CandidatePoolTab({
             Refresh
           </Button>
         </div>
+        <p className="w-full text-xs text-app-subtle">
+          Scores are calculated from parsed resume details and candidate profile data.
+        </p>
       </div>
 
       {justShortlisted ? (
         <div className="rounded-panel border border-status-success/30 bg-status-success/5 px-3 py-2">
-          <InlineSuccess message="Candidate shortlisted. Send shortlisted candidates to client review from Applications." />
+          <InlineSuccess
+            message={
+              needsClientReview
+                ? 'Candidate shortlisted. Send shortlisted candidates to client review from Applications.'
+                : 'Candidate shortlisted. Continue with internal interview workflow from Applications.'
+            }
+          />
         </div>
       ) : null}
 
@@ -270,8 +312,7 @@ function CandidatePoolTab({
                 <TH className="py-2">Exp</TH>
                 <TH className="py-2">Score</TH>
                 <TH className="py-2">Status</TH>
-                <TH className="py-2">Matched skills</TH>
-                {canShortlist ? <TH className="py-2 text-right"> </TH> : null}
+                <TH className="py-2 text-right">Actions</TH>
               </TR>
             </THead>
             <TBody>
@@ -280,60 +321,76 @@ function CandidatePoolTab({
                 const busy = shortlistingId === cid
                 const done = shortlistSuccess[cid] ?? false
                 const rowErr = shortlistErrors[cid] ?? ''
-                const cssInputClass = inputCls
-                void cssInputClass
+                const expanded = expandedId === cid
+                const colSpan = 7
+                void inputCls
                 return (
-                  <TR key={cid}>
-                    <TD className="py-2 text-xs text-app-subtle">{idx + 1}</TD>
-                    <TD className="py-2">
-                      <p className="text-sm font-medium text-app-text">{candidateName(row)}</p>
-                      <p className="font-mono text-xs text-app-secondary">{row.candidate.phone}</p>
-                    </TD>
-                    <TD className="py-2 text-xs text-app-secondary">
-                      <p>{row.candidate.current_role?.trim() || '-'}</p>
-                      <p>{row.candidate.current_location?.trim() || '-'}</p>
-                    </TD>
-                    <TD className="py-2 text-xs">{fmtExp(row.candidate.total_experience_years)}</TD>
-                    <TD className="py-2 text-xs font-medium">{fmtScore(row.score)}</TD>
-                    <TD className="py-2">
-                      {row.match_status ? (
-                        <Badge variant={matchVariant(row.match_status)} className="text-[11px]">
-                          {row.match_status.replace(/_/g, ' ')}
-                        </Badge>
-                      ) : null}
-                    </TD>
-                    <TD className="py-2 text-xs text-app-secondary max-w-[200px]">
-                      {row.matched_skills && row.matched_skills.length > 0 ? (
-                        <span className="text-status-hired">{row.matched_skills.slice(0, 4).join(', ')}{row.matched_skills.length > 4 ? ` +${row.matched_skills.length - 4}` : ''}</span>
-                      ) : '-'}
-                      {row.missing_skills && row.missing_skills.length > 0 ? (
-                        <span className="block text-status-danger">
-                          Missing: {row.missing_skills.slice(0, 3).join(', ')}{row.missing_skills.length > 3 ? ` +${row.missing_skills.length - 3}` : ''}
-                        </span>
-                      ) : null}
-                    </TD>
-                    {canShortlist ? (
+                  <Fragment key={cid}>
+                    <TR>
+                      <TD className="py-2 text-xs text-app-subtle">{idx + 1}</TD>
+                      <TD className="py-2">
+                        <p className="text-sm font-medium text-app-text">{candidateName(row)}</p>
+                        <p className="font-mono text-xs text-app-secondary">{row.candidate.phone}</p>
+                      </TD>
+                      <TD className="py-2 text-xs text-app-secondary">
+                        <p>{row.candidate.current_role?.trim() || '—'}</p>
+                        <p>{row.candidate.current_location?.trim() || '—'}</p>
+                      </TD>
+                      <TD className="py-2 text-xs">{fmtExp(row.candidate.total_experience_years)}</TD>
+                      <TD className="py-2 text-xs font-semibold tabular-nums">{formatMatchScore(row.score)}</TD>
+                      <TD className="py-2">
+                        {row.match_status ? (
+                          <Badge variant={matchStatusBadgeVariant(row.match_status)} className="text-[11px]">
+                            {row.match_status}
+                          </Badge>
+                        ) : null}
+                      </TD>
                       <TD className="py-2 text-right">
-                        <div className="flex flex-col items-end gap-0.5">
-                          {done ? (
-                            <Badge variant="success" className="text-[11px]">Shortlisted</Badge>
-                          ) : (
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="min-h-7 gap-1 px-2 text-xs"
-                              disabled={busy || shortlistingId != null}
-                              onClick={() => void handleShortlist(row)}
-                            >
-                              <UserPlus className="h-3 w-3" aria-hidden />
-                              {busy ? 'Shortlisting…' : 'Shortlist'}
-                            </Button>
-                          )}
+                        <div className="flex flex-col items-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="min-h-7 gap-1 px-2 text-xs"
+                            onClick={() => setExpandedId(expanded ? null : cid)}
+                          >
+                            {expanded ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
+                            {expanded ? 'Hide scorecard' : 'View scorecard'}
+                          </Button>
+                          <Link
+                            to={`/candidates/${cid}`}
+                            className="inline-flex min-h-7 items-center gap-1 px-2 text-xs font-medium text-brand-700 hover:underline dark:text-brand-300"
+                          >
+                            <ExternalLink className="h-3 w-3" aria-hidden />
+                            Open candidate
+                          </Link>
+                          {canShortlist ? (
+                            done ? (
+                              <Badge variant="success" className="text-[11px]">Shortlisted</Badge>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                className="min-h-7 gap-1 px-2 text-xs"
+                                disabled={busy || shortlistingId != null}
+                                onClick={() => void handleShortlist(row)}
+                              >
+                                <UserPlus className="h-3 w-3" aria-hidden />
+                                {busy ? 'Shortlisting…' : 'Shortlist'}
+                              </Button>
+                            )
+                          ) : null}
                           {rowErr ? <InlineError message={rowErr} /> : null}
                         </div>
                       </TD>
+                    </TR>
+                    {expanded ? (
+                      <TR key={`${cid}-scorecard`}>
+                        <TD colSpan={colSpan} className="bg-app-muted/30 px-4 py-4">
+                          <CandidateMatchScorecard data={poolRowToScorecard(row)} compact />
+                        </TD>
+                      </TR>
                     ) : null}
-                  </TR>
+                  </Fragment>
                 )
               })}
             </TBody>
@@ -376,7 +433,8 @@ function FilterField({
 
 type AppGroupKey = 'shortlisted' | 'sent' | 'approved' | 'offer' | 'closed'
 
-const APP_GROUPS: { key: AppGroupKey; label: string; description: string }[] = [
+// Groups for billable (client review) lane
+const APP_GROUPS_BILLABLE: { key: AppGroupKey; label: string; description: string }[] = [
   { key: 'shortlisted', label: 'Shortlisted', description: 'Ready to send to the client for review.' },
   { key: 'sent', label: 'Sent to client', description: 'Awaiting the client decision.' },
   { key: 'approved', label: 'Client approved', description: 'Ready for offer.' },
@@ -384,7 +442,15 @@ const APP_GROUPS: { key: AppGroupKey; label: string; description: string }[] = [
   { key: 'closed', label: 'Deployed / closed', description: 'Deployed, rejected or cancelled.' },
 ]
 
-function categorizeApp(app: HiringApplicationRow): AppGroupKey {
+// Groups for non-billable (internal) lane - no client review steps
+const APP_GROUPS_INTERNAL: { key: AppGroupKey; label: string; description: string }[] = [
+  { key: 'shortlisted', label: 'Shortlisted', description: 'Ready for internal interview/selection.' },
+  { key: 'approved', label: 'Selected', description: 'Ready for offer.' },
+  { key: 'offer', label: 'Offer stage', description: 'Offer in progress or accepted.' },
+  { key: 'closed', label: 'Deployed / closed', description: 'Deployed, rejected or cancelled.' },
+]
+
+function categorizeApp(app: HiringApplicationRow, needsClientReview: boolean): AppGroupKey {
   if (app.status === 'deployed' || app.status === 'rejected' || app.status === 'cancelled') return 'closed'
   if (
     app.status === 'offer_released' ||
@@ -394,7 +460,10 @@ function categorizeApp(app: HiringApplicationRow): AppGroupKey {
   )
     return 'offer'
   if (app.client_decision === 'approved' || app.status === 'selected') return 'approved'
-  if (app.client_visible || app.status === 'client_review') return 'sent'
+  // For billable lane, show client review steps
+  if (needsClientReview) {
+    if (app.client_visible || app.status === 'client_review') return 'sent'
+  }
   return 'shortlisted'
 }
 
@@ -408,6 +477,8 @@ function ApplicationsTab({
   onChanged: () => void
 }) {
   const navigate = useNavigate()
+  const needsClientReview = demandRequiresClientReview(demand)
+  const appGroups = needsClientReview ? APP_GROUPS_BILLABLE : APP_GROUPS_INTERNAL
   const [rows, setRows] = useState<HiringApplicationRow[]>([])
   const [count, setCount] = useState<number | undefined>()
   const [loading, setLoading] = useState(true)
@@ -475,9 +546,9 @@ function ApplicationsTab({
     }
   }
 
-  const grouped = APP_GROUPS.map((g) => ({
+  const grouped = appGroups.map((g) => ({
     ...g,
-    items: rows.filter((r) => categorizeApp(r) === g.key),
+    items: rows.filter((r) => categorizeApp(r, needsClientReview) === g.key),
   })).filter((g) => g.items.length > 0)
 
   return (
@@ -497,7 +568,7 @@ function ApplicationsTab({
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
         </Button>
-        {canSendToClient && (
+        {canSendToClient && needsClientReview ? (
           <div className="flex items-center gap-2 ml-auto">
             <Button
               type="button"
@@ -509,7 +580,7 @@ function ApplicationsTab({
               {bulkBusy ? 'Sending…' : 'Send shortlisted to client'}
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
 
       {bulkResult ? (
@@ -556,7 +627,7 @@ function ApplicationsTab({
                   const sent = sendSuccess[app.id] ?? false
                   const appErr = sendErrors[app.id] ?? ''
                   const canSend =
-                    canSendToClient && !app.client_visible && app.status !== 'rejected' && app.status !== 'cancelled'
+                    canSendToClient && needsClientReview && !app.client_visible && app.status !== 'rejected' && app.status !== 'cancelled'
                   const readyForOffer = group.key === 'approved'
                   const readyForDeployment =
                     app.offer_status === 'accepted' || app.status === 'offer_accepted'
@@ -734,6 +805,7 @@ export function HiringDemandDetailPage() {
       {tab === 'pool' ? (
         <CandidatePoolTab
           demandId={demandId}
+          demand={demand}
           canShortlist={canShortlist}
           onShortlisted={() => {
             void refreshDemand()

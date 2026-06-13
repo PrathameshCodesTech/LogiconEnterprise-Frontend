@@ -13,11 +13,13 @@ import {
 import type { MRFRow, MRFType, BillingType, RequestedByType, MRFWriteInput } from '@/features/mrf/types'
 import type { BudgetPlanRow } from '@/features/budgets/types'
 import { budgetNatureLabel, formatBudgetAmount } from '@/features/budgets/types'
+import { formatMoneyAmount } from '@/features/budgets/budgetDisplay'
 import {
   formatBudgetPlanOptionLabel,
   loadBillableBudgetOptionsForSite,
-  loadNonBillableBudgetOptionsForDepartments,
+  loadInternalHiringBudgetForDepartment,
 } from '@/features/budgets/budgetLookup'
+import { Spinner } from '@/components/ui/Spinner'
 import { isClientFacingUser } from '@/features/mrf/mrfClientMode'
 import { useAuthStore } from '@/features/auth/authStore'
 
@@ -172,6 +174,14 @@ export function MRFForm({
     () => (isNonBillable ? validateMrfClientFields(values) : null),
     [values, isNonBillable],
   )
+  // Required department is mandatory for non-billable MRFs
+  const requiredDepartmentError = useMemo(() => {
+    if (isNonBillable && !values.required_department) {
+      return 'Required department is mandatory for non-billable MRF.'
+    }
+    return null
+  }, [isNonBillable, values.required_department])
+
   const budgetHelperCopy = isBillable
     ? isClientMrfUi
       ? 'Billable budgets are tied to approved client site manpower.'
@@ -220,8 +230,10 @@ export function MRFForm({
   const [budgetLoading, setBudgetLoading] = useState(false)
   const [budgetLookupError, setBudgetLookupError] = useState<string | null>(null)
 
+  // Budget lookup for billable MRFs only - non-billable uses strict internal hiring budget
   useEffect(() => {
-    if (!canReadBudget) {
+    // Non-billable MRFs use internal hiring budget resolution, not this dropdown
+    if (!canReadBudget || values.billing_type === 'non_billable') {
       setBudgetRows([])
       setBudgetLookupError(null)
       setBudgetLoading(false)
@@ -232,59 +244,86 @@ export function MRFForm({
       setBudgetLoading(true)
       setBudgetLookupError(null)
       setBudgetRows([])
-      if (values.billing_type === 'billable') {
-        const sid = Number(values.site)
-        const cid = selectedSite?.client
-        if (!Number.isFinite(sid) || cid == null || !Number.isFinite(cid)) {
-          if (!cancelled) setBudgetLoading(false)
-          return
-        }
-        const res = await loadBillableBudgetOptionsForSite(sid, cid)
-        if (cancelled) return
-        if (res.ok) setBudgetRows(res.items)
-        else {
-          setBudgetRows([])
-          setBudgetLookupError(res.error)
-        }
-        setBudgetLoading(false)
+      const sid = Number(values.site)
+      const cid = selectedSite?.client
+      if (!Number.isFinite(sid) || cid == null || !Number.isFinite(cid)) {
+        if (!cancelled) setBudgetLoading(false)
         return
       }
-      if (values.billing_type === 'non_billable') {
-        const ids: number[] = []
-        const req = Number(values.requesting_department)
-        const reqd = Number(values.required_department)
-        if (Number.isFinite(req) && req > 0) ids.push(req)
-        if (Number.isFinite(reqd) && reqd > 0) ids.push(reqd)
-        const res = await loadNonBillableBudgetOptionsForDepartments(ids)
-        if (cancelled) return
-        if (res.ok) {
-          const allowed = new Set(ids)
-          setBudgetRows(
-            res.items.filter((b) => b.department == null || allowed.has(Number(b.department))),
-          )
-        } else {
-          setBudgetRows([])
-          setBudgetLookupError(res.error)
-        }
-        setBudgetLoading(false)
-        return
+      const res = await loadBillableBudgetOptionsForSite(sid, cid)
+      if (cancelled) return
+      if (res.ok) setBudgetRows(res.items)
+      else {
+        setBudgetRows([])
+        setBudgetLookupError(res.error)
       }
-      if (!cancelled) setBudgetLoading(false)
+      setBudgetLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [
-    canReadBudget,
-    values.billing_type,
-    values.site,
-    values.requesting_department,
-    values.required_department,
-    selectedSite?.client,
-  ])
+  }, [canReadBudget, values.billing_type, values.site, selectedSite?.client])
+
+  // Strict internal hiring budget resolution for non-billable MRFs
+  const [internalBudget, setInternalBudget] = useState<BudgetPlanRow | null>(null)
+  const [internalBudgetLoading, setInternalBudgetLoading] = useState(false)
+  const [internalBudgetError, setInternalBudgetError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Only resolve for non-billable MRFs with a required department
+    if (!isNonBillable || !values.required_department) {
+      setInternalBudget(null)
+      setInternalBudgetError(null)
+      setInternalBudgetLoading(false)
+      // Clear budget_plan when switching away from non-billable or clearing department
+      if (isNonBillable) {
+        setValues((v) => ({ ...v, budget_plan: '' }))
+      }
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      setInternalBudgetLoading(true)
+      setInternalBudgetError(null)
+      const res = await loadInternalHiringBudgetForDepartment(Number(values.required_department))
+      if (cancelled) return
+      if (res.ok) {
+        setInternalBudget(res.budget)
+        if (res.budget) {
+          // Auto-set budget_plan from resolved internal budget
+          setValues((v) => ({ ...v, budget_plan: String(res.budget!.id) }))
+        } else {
+          setValues((v) => ({ ...v, budget_plan: '' }))
+          setInternalBudgetError(
+            'No active internal hiring budget is configured for this department. Create one before submitting this MRF.',
+          )
+        }
+      } else {
+        setInternalBudget(null)
+        setValues((v) => ({ ...v, budget_plan: '' }))
+        setInternalBudgetError(res.error)
+      }
+      setInternalBudgetLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isNonBillable, values.required_department])
+
+  // Block submission if non-billable MRF has no internal budget or is still loading
+  const internalBudgetBlocking =
+    isNonBillable && values.required_department && !internalBudget
 
   const deptSelectDisabled = !!(submitting || departmentLookupError)
-  const canSubmit = !submitting && !siteError && !requiredByError && !clientFieldsError && !lookupError
+  const canSubmit =
+    !submitting &&
+    !siteError &&
+    !requiredByError &&
+    !clientFieldsError &&
+    !lookupError &&
+    !requiredDepartmentError &&
+    !internalBudgetBlocking &&
+    !internalBudgetLoading
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -408,12 +447,13 @@ export function MRFForm({
         <div className="space-y-1">
           <Select
             id="mrf_required_department"
-            label="Required department"
+            label={isNonBillable ? 'Required department *' : 'Required department'}
             value={values.required_department}
             onChange={(e) => setValues((v) => ({ ...v, required_department: e.target.value }))}
             disabled={deptSelectDisabled}
+            error={requiredDepartmentError ?? undefined}
           >
-            <option value="">None</option>
+            <option value="">{isNonBillable ? 'Select department...' : 'None'}</option>
             {departmentOptionsForSelectedSite.map((o) => (
               <option key={o.id} value={String(o.id)}>
                 {optionLabel(o)}
@@ -421,8 +461,52 @@ export function MRFForm({
             ))}
           </Select>
           <p className="text-xs text-app-subtle">
-            Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.
+            {isNonBillable
+              ? 'Department that will use the internal hiring budget. Required for non-billable MRF.'
+              : 'Department or service where manpower is needed (e.g. Housekeeping). Strongly recommended when applicable.'}
           </p>
+        </div>
+      ) : null}
+
+      {/* Internal hiring budget card for non-billable MRFs */}
+      {isNonBillable && values.required_department && !isClientMrfUi ? (
+        <div className="rounded-panel border border-app-border bg-app-muted/30 p-4">
+          <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">
+            Internal Hiring Budget
+          </p>
+          {internalBudgetLoading ? (
+            <div className="mt-2 flex items-center gap-2 text-sm text-app-secondary">
+              <Spinner className="h-4 w-4" />
+              <span>Resolving budget...</span>
+            </div>
+          ) : internalBudgetError ? (
+            <div className="mt-2 rounded border border-status-danger/30 bg-status-danger/5 p-3">
+              <p className="text-sm text-status-danger">{internalBudgetError}</p>
+            </div>
+          ) : internalBudget ? (
+            <div className="mt-2 space-y-1 text-sm">
+              <p className="font-medium text-app-text">
+                {internalBudget.name}
+                <span className="ml-1 font-mono text-xs text-app-secondary">
+                  ({internalBudget.code})
+                </span>
+              </p>
+              <div className="grid gap-1 text-xs sm:grid-cols-2">
+                <p className="text-app-secondary">
+                  Total: {formatMoneyAmount(internalBudget.amount, internalBudget.currency ?? 'INR')}
+                </p>
+                <p className="text-app-secondary">
+                  Reserved: {formatMoneyAmount(internalBudget.reserved_amount ?? null, internalBudget.currency ?? 'INR')}
+                </p>
+                <p className="text-app-secondary">
+                  Committed: {formatMoneyAmount(internalBudget.committed_amount ?? null, internalBudget.currency ?? 'INR')}
+                </p>
+                <p className="text-app-secondary">
+                  Available: {formatMoneyAmount(internalBudget.available_amount ?? null, internalBudget.currency ?? 'INR')}
+                </p>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -466,7 +550,8 @@ export function MRFForm({
         </div>
       ) : null}
 
-      {canReadBudget ? (
+      {/* Budget dropdown - only for billable MRFs. Non-billable uses auto-resolved internal hiring budget */}
+      {canReadBudget && isBillable ? (
         <>
           {budgetLookupError ? (
             <ErrorState
@@ -475,22 +560,23 @@ export function MRFForm({
           ) : null}
           <Select
             id="mrf_budget_plan"
-            label={isBillable ? 'Budget plan' : 'Non-billable budget plan'}
+            label="Budget plan"
             value={values.budget_plan}
             onChange={(e) => setValues((v) => ({ ...v, budget_plan: e.target.value }))}
             disabled={
               submitting ||
               budgetLoading ||
               !!budgetLookupError ||
-              (isBillable &&
-                (!values.site.trim() || selectedSite?.client == null || !Number.isFinite(Number(selectedSite.client))))
+              !values.site.trim() ||
+              selectedSite?.client == null ||
+              !Number.isFinite(Number(selectedSite.client))
             }
           >
             <option value="">
-              {values.billing_type === 'billable' && (!values.site.trim() || selectedSite?.client == null)
+              {!values.site.trim() || selectedSite?.client == null
                 ? 'Select a site first'
                 : budgetLoading
-                  ? 'Loading budgets…'
+                  ? 'Loading budgets...'
                   : 'No budget selected'}
             </option>
             {budgetRows.map((b) => (

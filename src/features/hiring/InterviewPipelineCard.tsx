@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn'
 import { hiringApplicationStatusLabel } from '@/features/talent/talentLabels'
 import { statusBadgeVariant } from '@/features/hiring/hiringPipelineUtils'
 import { feedbackRecommendationTone, interviewRoundLabel, latestFeedback } from '@/features/hiring/hiringStageActions'
+import { hasLaneInfo, hiringLaneBadgeLabel, hiringLaneBadgeVariant } from '@/features/hiring/hiringLaneLabels'
 import type { InterviewPipelineBucketItem, InterviewPipelineBucketKey, InterviewRow } from '@/features/hiring/types'
 
 const ROUND_KEYS = ['hr', 'technical', 'manager', 'client', 'final'] as const
@@ -124,6 +125,11 @@ export function InterviewPipelineCard({
       {meta ? <p className="truncate text-xs text-app-secondary">{meta}</p> : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
+        {hasLaneInfo(app) ? (
+          <Badge variant={hiringLaneBadgeVariant(app)} className="text-[10px]">
+            {hiringLaneBadgeLabel(app)}
+          </Badge>
+        ) : null}
         {app.interview_plan != null ? (
           <Badge variant="info" className="text-[10px]">Plan applied</Badge>
         ) : (

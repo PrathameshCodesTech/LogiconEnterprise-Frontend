@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Eye } from 'lucide-react'
+import { ArrowLeft, Eye, FileText, Layers, List } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -22,6 +22,12 @@ import type {
 } from '@/features/formBuilder/types'
 
 type TabKey = 'sections' | 'fields' | 'preview'
+
+const TAB_CONFIG: { id: TabKey; label: string; icon: typeof Layers; description: string }[] = [
+  { id: 'sections', label: 'Sections', icon: Layers, description: 'Organize form structure' },
+  { id: 'fields', label: 'Fields', icon: List, description: 'Configure input fields' },
+  { id: 'preview', label: 'Preview', icon: Eye, description: 'See live preview' },
+]
 
 interface JobRoleLookup {
   id: number
@@ -159,69 +165,76 @@ export function FormTemplateEditorPage() {
     )
   }
 
-  const tabs: { id: TabKey; label: string }[] = [
-    { id: 'sections', label: 'Sections' },
-    { id: 'fields', label: 'Fields' },
-    { id: 'preview', label: 'Preview' },
-  ]
-
   return (
     <div className="w-full space-y-4">
-      <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 shadow-sm">
+            <FileText className="h-5 w-5 text-white" aria-hidden />
+          </div>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Form template</p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-app-text">{template.name}</h2>
-            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-app-secondary">
-              <span className="rounded border border-app-border bg-app-muted px-2 py-0.5 font-mono text-xs">
+            <p className="text-xs font-medium uppercase tracking-wider text-brand-600">Form Template</p>
+            <h2 className="mt-0.5 truncate text-xl font-semibold text-app-text">{template.name}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="rounded border border-app-border bg-app-muted px-2 py-0.5 font-mono text-xs text-app-secondary">
                 {template.code}
               </span>
-              {template.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
+              {template.is_active ? (
+                <Badge variant="success">Active</Badge>
+              ) : (
+                <Badge variant="danger">Inactive</Badge>
+              )}
               <span className="text-xs text-app-subtle">
                 Updated {new Date(template.updated_at).toLocaleString()}
               </span>
-            </p>
+            </div>
             {template.description ? (
               <p className="mt-2 text-sm text-app-secondary">{template.description}</p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              className="min-h-9 px-2"
-              onClick={() => navigate('/form-builder')}
-              aria-label="Back to templates"
-              title="Back"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-            </Button>
-            <Button variant="secondary" onClick={() => setTab('preview')}>
-              <Eye className="mr-1 h-4 w-4" aria-hidden />
-              Preview
-            </Button>
-          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            className="min-h-9 px-3"
+            onClick={() => navigate('/form-builder')}
+          >
+            <ArrowLeft className="mr-1 h-4 w-4" aria-hidden />
+            Back
+          </Button>
+          <Button onClick={() => setTab('preview')}>
+            <Eye className="mr-1 h-4 w-4" aria-hidden />
+            Preview
+          </Button>
         </div>
       </div>
 
       <TemplateBasicsPanel template={template} canEdit={canEdit} onSaved={setTemplate} />
 
-      <div className="flex flex-wrap gap-8 border-b border-app-border">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`-mb-px border-b-2 pb-3 pt-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${
-              tab === t.id
-                ? 'border-app-text font-semibold text-app-text'
-                : 'border-transparent font-normal text-app-secondary hover:text-app-text'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-6 border-b border-app-border">
+        {TAB_CONFIG.map((t) => {
+          const Icon = t.icon
+          const isActive = tab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setTab(t.id)}
+              className={`-mb-px flex items-center gap-2 border-b-2 pb-3 pt-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${
+                isActive
+                  ? 'border-brand-600 font-medium text-app-text'
+                  : 'border-transparent text-app-secondary hover:text-app-text'
+              }`}
+            >
+              <Icon className={`h-4 w-4 ${isActive ? 'text-brand-600' : 'text-app-subtle'}`} aria-hidden />
+              <span>{t.label}</span>
+            </button>
+          )
+        })}
       </div>
 
       {tab === 'sections' ? (

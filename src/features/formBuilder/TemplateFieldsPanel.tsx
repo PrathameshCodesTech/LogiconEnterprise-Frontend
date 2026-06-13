@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Filter, List, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -209,90 +209,127 @@ export function TemplateFieldsPanel({
   }, [sectionFilter, sections])
 
   return (
-    <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-app-text">Fields</p>
-          <p className="text-xs text-app-secondary">
-            Common fields apply to every role. Role-specific fields only appear when that role is selected.
-          </p>
+    <div className="space-y-4">
+      {/* Header Card */}
+      <div className="flex flex-col gap-4 rounded-xl border border-app-border bg-app-surface p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-100">
+            <List className="h-5 w-5 text-brand-600" aria-hidden />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-app-text">Form Fields</h3>
+            <p className="text-sm text-app-secondary">Configure input fields for each section</p>
+          </div>
         </div>
         {canEdit ? (
-          <Button onClick={openCreate} disabled={sections.length === 0} className="sm:self-start">
-            <Plus className="mr-1 h-4 w-4" aria-hidden />
-            Add field
+          <Button onClick={openCreate} disabled={sections.length === 0} className="gap-2">
+            <Plus className="h-4 w-4" aria-hidden />
+            Add Field
           </Button>
         ) : null}
       </div>
 
       {sections.length === 0 ? (
-        <div className="mt-3 rounded-panel border border-dashed border-app-border bg-app-muted px-4 py-3">
-          <p className="text-sm font-medium text-app-text">No sections yet</p>
-          <p className="mt-0.5 text-xs text-app-secondary">
-            Switch to the <span className="font-semibold">Sections</span> tab and add sections such as General Information and Documents before creating fields.
-          </p>
+        <div className="rounded-xl border-2 border-dashed border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+              <Search className="h-5 w-5 text-amber-600" aria-hidden />
+            </div>
+            <div>
+              <p className="font-semibold text-amber-800">No sections available</p>
+              <p className="mt-1 text-sm text-amber-700">
+                Switch to the <span className="font-semibold">Sections</span> tab and add sections like General Information and Documents before creating fields.
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        <Select
-          id="field_filter_section"
-          label="Section"
-          value={sectionFilter}
-          onChange={(e) => setSectionFilter(e.target.value)}
-        >
-          <option value="all">All sections</option>
-          {sections.map((s) => (
-            <option key={s.id} value={String(s.id)}>
-              {s.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="field_filter_role"
-          label="Role"
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
-        >
-          <option value="all">All</option>
-          {roleFilterOptions.hasCommon ? <option value="common">Common only</option> : null}
-          {roleFilterOptions.roles.map((r) => (
-            <option key={r.id} value={String(r.id)}>
-              {r.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          id="field_filter_active"
-          label="Status"
-          value={activeFilter}
-          onChange={(e) => setActiveFilter(e.target.value as typeof activeFilter)}
-        >
-          <option value="all">All</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </Select>
+      {/* Filters Card */}
+      <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2">
+          <Filter className="h-4 w-4 text-app-subtle" aria-hidden />
+          <span className="text-sm font-medium text-app-secondary">Filter Fields</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Select
+            id="field_filter_section"
+            label="Section"
+            value={sectionFilter}
+            onChange={(e) => setSectionFilter(e.target.value)}
+          >
+            <option value="all">All sections</option>
+            {sections.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            id="field_filter_role"
+            label="Role"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+          >
+            <option value="all">All</option>
+            {roleFilterOptions.hasCommon ? <option value="common">Common only</option> : null}
+            {roleFilterOptions.roles.map((r) => (
+              <option key={r.id} value={String(r.id)}>
+                {r.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            id="field_filter_active"
+            label="Status"
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value as typeof activeFilter)}
+          >
+            <option value="all">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </Select>
+        </div>
       </div>
 
-      <div className="mt-4">
+      {/* Fields List */}
+      <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
         {loading ? (
-          <Spinner label="Loading fields..." />
+          <div className="py-8">
+            <Spinner label="Loading fields..." />
+          </div>
         ) : error ? (
           <ErrorState message={error} />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            title="No fields match"
-            description="Adjust the filters above or add a new field for this template."
-          />
+          <div className="py-8">
+            <EmptyState
+              title="No fields match"
+              description="Adjust the filters above or add a new field for this template."
+            />
+          </div>
         ) : (
           <>
+            {/* Mobile Card View */}
             <div className="grid gap-3 md:hidden">
               {filtered.map((f) => (
-                <div key={f.id} className="rounded border border-app-border bg-app-muted p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-app-text">{f.label}</p>
-                      <p className="truncate font-mono text-xs text-app-secondary">{f.field_key}</p>
+                <div
+                  key={f.id}
+                  className="group overflow-hidden rounded-xl border border-app-border bg-gradient-to-r from-app-muted via-app-muted to-transparent p-4 transition-all hover:border-brand-300 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={fieldTypeBadgeVariant(f.field_type)}>
+                          {FIELD_TYPE_LABEL[f.field_type]}
+                        </Badge>
+                        {f.is_required ? (
+                          <span className="text-xs font-medium text-status-danger">Required</span>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 truncate text-base font-semibold text-app-text">{f.label}</p>
+                      <p className="truncate rounded-md bg-white/60 px-2 py-0.5 font-mono text-xs text-app-secondary inline-block mt-1">
+                        {f.field_key}
+                      </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       {f.is_active ? (
@@ -300,38 +337,32 @@ export function TemplateFieldsPanel({
                       ) : (
                         <Badge variant="neutral">Inactive</Badge>
                       )}
-                      {f.is_required ? <Badge variant="warning">Required</Badge> : null}
                     </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-app-secondary">
-                    <span className="flex items-center gap-1">
-                      <span className="text-app-subtle">Type:</span>
-                      <Badge variant={fieldTypeBadgeVariant(f.field_type)}>
-                        {FIELD_TYPE_LABEL[f.field_type]}
-                      </Badge>
-                    </span>
-                    <span>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg bg-white/60 px-2.5 py-1.5">
                       <span className="text-app-subtle">Section:</span>{' '}
-                      {f.section_name ?? sectionNameById.get(f.section ?? -1) ?? '—'}
-                    </span>
-                    <span>
+                      <span className="font-medium text-app-secondary">
+                        {f.section_name ?? sectionNameById.get(f.section ?? -1) ?? '—'}
+                      </span>
+                    </div>
+                    <div className="rounded-lg bg-white/60 px-2.5 py-1.5">
                       <span className="text-app-subtle">Role:</span>{' '}
-                      {f.role == null ? 'Common' : f.role_name ?? roleNameById.get(f.role) ?? `Role #${f.role}`}
-                    </span>
-                    <span>
-                      <span className="text-app-subtle">Order:</span> {f.sort_order}
-                    </span>
+                      <span className="font-medium text-app-secondary">
+                        {f.role == null ? 'Common' : f.role_name ?? roleNameById.get(f.role) ?? `Role #${f.role}`}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-app-border pt-3">
                     {canEdit ? (
-                      <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(f)}>
-                        <Pencil className="mr-1 h-4 w-4" aria-hidden />
+                      <Button variant="secondary" className="min-h-9 rounded-lg px-4 shadow-sm" onClick={() => openEdit(f)}>
+                        <Pencil className="mr-1.5 h-4 w-4" aria-hidden />
                         Edit
                       </Button>
                     ) : null}
                     {canDelete ? (
-                      <Button variant="danger" className="min-h-9 px-3" onClick={() => handleDelete(f)}>
-                        <Trash2 className="mr-1 h-4 w-4" aria-hidden />
+                      <Button variant="danger" className="min-h-9 rounded-lg px-4 shadow-sm" onClick={() => handleDelete(f)}>
+                        <Trash2 className="mr-1.5 h-4 w-4" aria-hidden />
                         Deactivate
                       </Button>
                     ) : null}
@@ -340,6 +371,7 @@ export function TemplateFieldsPanel({
               ))}
             </div>
 
+            {/* Desktop Table View */}
             <div className="hidden md:block">
               <Table>
                 <THead>
@@ -356,11 +388,13 @@ export function TemplateFieldsPanel({
                 </THead>
                 <TBody>
                   {filtered.map((f) => (
-                    <TR key={f.id}>
+                    <TR key={f.id} className="group transition-colors hover:bg-brand-50/30">
                       <TD className="py-3">
                         <div className="space-y-1">
                           <p className="text-sm font-semibold text-app-text">{f.label}</p>
-                          <p className="font-mono text-xs text-app-secondary">{f.field_key}</p>
+                          <p className="inline-block rounded-md bg-app-muted px-2 py-0.5 font-mono text-xs text-app-secondary">
+                            {f.field_key}
+                          </p>
                         </div>
                       </TD>
                       <TD className="py-3 text-sm text-app-secondary">
@@ -379,23 +413,33 @@ export function TemplateFieldsPanel({
                         )}
                       </TD>
                       <TD className="py-3 text-sm text-app-secondary">
-                        {f.is_required ? <Badge variant="warning">Required</Badge> : <span className="text-app-subtle">Optional</span>}
+                        {f.is_required ? (
+                          <Badge variant="warning">Required</Badge>
+                        ) : (
+                          <span className="text-app-subtle">Optional</span>
+                        )}
                       </TD>
                       <TD className="py-3 text-sm text-app-secondary">{f.sort_order}</TD>
                       <TD className="py-3">
                         {f.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="neutral">Inactive</Badge>}
                       </TD>
                       <TD className="py-3 text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-1.5">
                           {canEdit ? (
-                            <Button variant="secondary" className="min-h-9 px-2" onClick={() => openEdit(f)} aria-label="Edit" title="Edit">
+                            <Button
+                              variant="secondary"
+                              className="min-h-9 rounded-lg px-3 shadow-sm"
+                              onClick={() => openEdit(f)}
+                              aria-label="Edit"
+                              title="Edit"
+                            >
                               <Pencil className="h-4 w-4" aria-hidden />
                             </Button>
                           ) : null}
                           {canDelete ? (
                             <Button
                               variant="danger"
-                              className="min-h-9 px-2"
+                              className="min-h-9 rounded-lg px-3 shadow-sm"
                               onClick={() => handleDelete(f)}
                               aria-label="Deactivate"
                               title="Deactivate"

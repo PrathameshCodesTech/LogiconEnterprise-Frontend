@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, Info, Plus, ToggleLeft, ToggleRight } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Settings2, Users, Wrench } from 'lucide-react'
 import {
   assignSiteSurveyOwner,
   createSiteSurveyEquipmentLine,
@@ -9,6 +9,8 @@ import {
   createSiteSurveyShiftDeployment,
   generateRoleRequirementsFromSurvey,
   getSiteSurveyStructured,
+  listEligibleOperationsOwnersForLead,
+  listSalesRoleRequirements,
   listSurveyRoleMappings,
   markSiteSurveyCompleted,
   markSiteSurveyStarted,
@@ -19,7 +21,8 @@ import {
   updateSiteSurveyScopeAnswer,
   updateSiteSurveyShiftDeployment,
 } from '@/api/sales'
-import { listUsers, type UserRow } from '@/api/users'
+import type { UserRow } from '@/api/users'
+import { listJobRoles, type JobRoleRow } from '@/api/jobs'
 import { ROUTES } from '@/app/routes'
 import { useAuthStore } from '@/features/auth/authStore'
 import { surveyStatusLabel, surveyStatusVariant, formatShortDate } from '@/features/sales/salesUtils'
@@ -30,6 +33,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import type {
   GenerateRoleRequirementsResult,
+  SalesRoleRequirement,
   SiteSurveyEquipmentLine,
   SiteSurveyIssueLine,
   SiteSurveyLocationLine,
@@ -80,6 +84,18 @@ function isRoleMappingIgnored(description?: string): boolean {
 
 type RowSaveState = { saving: boolean; error: string | null; success?: boolean }
 
+/**
+ * Formats headcount for display: removes unnecessary decimals.
+ * 1.00 -> "1", 2.50 -> "2.5", 0.00 -> "0", null/undefined -> "—"
+ */
+function formatHeadcount(value: number | string | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  const num = typeof value === 'string' ? parseFloat(value) : value
+  if (Number.isNaN(num)) return '—'
+  // Remove trailing zeros after decimal
+  return num % 1 === 0 ? String(Math.trunc(num)) : String(num)
+}
+
 // ─── Utility Components ───────────────────────────────────────────────────────
 
 function SaveIndicator({ state }: { state: RowSaveState | undefined }) {
@@ -104,15 +120,24 @@ function ApplicableToggle({
       type="button"
       onClick={() => onChange(!value)}
       disabled={disabled}
-      className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium transition-colors ${
-        value
-          ? 'bg-status-success/10 text-status-success hover:bg-status-success/20'
-          : 'bg-app-muted text-app-subtle hover:bg-app-border'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-      title={value ? 'Applicable' : 'Not applicable'}
+      className={`inline-flex items-center gap-1.5 transition-all duration-150 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      title={value ? 'Click to disable' : 'Click to enable'}
     >
-      {value ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
-      {value ? 'Yes' : 'N/A'}
+      {/* Switch track */}
+      <span className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-150 ${
+        value ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+      }`}>
+        {/* Switch knob */}
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-150 ${
+          value ? 'translate-x-4' : 'translate-x-0.5'
+        }`} />
+      </span>
+      {/* Label */}
+      <span className={`text-xs font-medium ${
+        value ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'
+      }`}>
+        {value ? 'Yes' : 'N/A'}
+      </span>
     </button>
   )
 }
@@ -122,19 +147,28 @@ function SectionCard({
   description,
   children,
   className = '',
+  accent = 'brand',
 }: {
   title: string
   description?: string
   children: React.ReactNode
   className?: string
+  accent?: 'brand' | 'success' | 'warning' | 'neutral'
 }) {
+  const accentColors = {
+    brand: 'border-l-brand-500 bg-gradient-to-r from-brand-50/80 to-transparent dark:from-brand-900/20',
+    success: 'border-l-status-success bg-gradient-to-r from-green-50/80 to-transparent dark:from-green-900/20',
+    warning: 'border-l-status-warning bg-gradient-to-r from-amber-50/80 to-transparent dark:from-amber-900/20',
+    neutral: 'border-l-app-border bg-gradient-to-r from-gray-50/80 to-transparent dark:from-gray-900/20',
+  }
+
   return (
-    <div className={`rounded-panel border border-app-border bg-app-surface shadow-panel ${className}`}>
-      <div className="border-b border-app-border px-4 py-2.5">
-        <h3 className="text-sm font-semibold text-app-text">{title}</h3>
-        {description ? <p className="mt-0.5 text-xs text-app-secondary">{description}</p> : null}
+    <div className={`rounded-xl border border-app-border bg-app-surface shadow-sm overflow-hidden ${className}`}>
+      <div className={`border-l-4 ${accentColors[accent]} px-5 py-4`}>
+        <h3 className="text-base font-semibold text-app-heading tracking-tight">{title}</h3>
+        {description ? <p className="mt-1 text-sm text-app-secondary">{description}</p> : null}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-5 pt-4">{children}</div>
     </div>
   )
 }
@@ -158,21 +192,27 @@ function FormField({
   disabled?: boolean
   className?: string
 }) {
+  const hasValue = value?.trim().length > 0
   const baseClass =
-    'w-full rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text placeholder:text-app-subtle transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-app-muted disabled:cursor-not-allowed'
+    'w-full rounded-xl border-2 border-app-border/60 bg-white dark:bg-app-surface px-4 py-3 text-sm text-app-text placeholder:text-app-subtle/70 transition-all duration-200 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:shadow-sm disabled:bg-app-muted/50 disabled:cursor-not-allowed hover:border-app-border'
 
   return (
-    <div className={`space-y-1.5 ${className}`}>
-      <label className="block text-sm font-medium text-app-secondary">{label}</label>
+    <div className={`group ${className}`}>
+      <label className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-app-subtle group-focus-within:text-brand-600 transition-colors">
+        {label}
+        {hasValue && (
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-status-success" title="Filled" />
+        )}
+      </label>
       {multiline ? (
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          placeholder={placeholder}
+          placeholder={placeholder ?? `Enter ${label.toLowerCase()}...`}
           disabled={disabled}
           rows={3}
-          className={baseClass + ' resize-none'}
+          className={baseClass + ' resize-none min-h-[100px]'}
         />
       ) : (
         <input
@@ -180,32 +220,13 @@ function FormField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          placeholder={placeholder}
+          placeholder={placeholder ?? `Enter ${label.toLowerCase()}...`}
           disabled={disabled}
           className={baseClass}
         />
       )}
     </div>
   )
-}
-
-// Format number with Indian comma separators (1,00,000)
-function formatIndianNumber(num: number | null | undefined): string {
-  if (num == null) return ''
-  const str = num.toString()
-  const parts = str.split('.')
-  let intPart = parts[0] ?? ''
-  const decPart = parts[1]
-
-  // Indian format: last 3 digits, then groups of 2
-  if (intPart.length > 3) {
-    const lastThree = intPart.slice(-3)
-    const rest = intPart.slice(0, -3)
-    const formatted = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',')
-    intPart = formatted + ',' + lastThree
-  }
-
-  return decPart ? `${intPart}.${decPart}` : intPart
 }
 
 function NumberInput({
@@ -223,41 +244,41 @@ function NumberInput({
   min?: number
   className?: string
 }) {
-  const [isFocused, setIsFocused] = useState(false)
-  const [localValue, setLocalValue] = useState(value?.toString() ?? '')
+  // Clean number display (remove trailing .00)
+  function cleanNumber(v: number | null | undefined): string {
+    if (v == null) return ''
+    const num = Number(v)
+    if (Number.isNaN(num)) return ''
+    return num % 1 === 0 ? Math.trunc(num).toString() : num.toString()
+  }
 
-  // Sync localValue when value changes externally
-  useEffect(() => {
-    if (!isFocused) {
-      setLocalValue(value?.toString() ?? '')
-    }
-  }, [value, isFocused])
-
-  const displayValue = isFocused ? localValue : formatIndianNumber(value)
-  const formattedForTitle = formatIndianNumber(value)
+  const displayValue = cleanNumber(value)
 
   return (
     <input
-      type={isFocused ? 'number' : 'text'}
-      min={min}
+      type="text"
+      inputMode="decimal"
       value={displayValue}
-      title={formattedForTitle || undefined}
       onChange={(e) => {
         const raw = e.target.value
-        setLocalValue(raw)
-        onChange(raw === '' ? null : Number(raw))
-      }}
-      onFocus={() => {
-        setIsFocused(true)
-        setLocalValue(value?.toString() ?? '')
+        // Allow empty, numbers, and decimal point
+        if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) {
+          if (raw === '') {
+            onChange(null)
+            return
+          }
+          const parsed = Number(raw)
+          if (!Number.isNaN(parsed)) {
+            onChange(min !== undefined && parsed < min ? min : parsed)
+          }
+        }
       }}
       onBlur={(e) => {
-        setIsFocused(false)
         const parsed = e.target.value === '' ? null : Number(e.target.value)
-        onBlur?.(parsed)
+        onBlur?.(parsed !== null && min !== undefined && parsed < min ? min : parsed)
       }}
       disabled={disabled}
-      className={`min-w-[80px] w-full rounded-panel border border-app-border bg-app-surface px-2 py-1.5 text-sm text-center text-app-text placeholder:text-app-subtle transition-all focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:min-w-[100px] disabled:bg-app-muted disabled:cursor-not-allowed ${className}`}
+      className={`min-w-[80px] w-full rounded-lg border border-app-border bg-app-surface px-2 py-1.5 text-sm text-center text-app-text placeholder:text-app-subtle transition-all focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-app-muted disabled:cursor-not-allowed ${className}`}
     />
   )
 }
@@ -320,9 +341,11 @@ function ProgressRing({ percent, size = 40 }: { percent: number; size?: number }
 function roleGenerationReasonLabel(reason: string, description: string): string {
   switch (reason) {
     case 'role_mapping_not_found':
-      return `No role mapping configured for "${description}"`
+      return `Map "${description}" to a job role before generation`
     case 'job_role_not_found':
       return `No job role found for "${description}"`
+    case 'wage_category_not_found':
+      return `Wage category not configured for "${description}" skill category`
     case 'zero_headcount':
       return `"${description}" has zero headcount`
     case 'not_applicable':
@@ -338,6 +361,242 @@ function roleGenerationReasonLabel(reason: string, description: string): string 
   }
 }
 
+// ─── Workflow Stepper ─────────────────────────────────────────────────────────
+
+type StepStatus = 'done' | 'active' | 'warning' | 'pending' | 'locked'
+
+interface WorkflowStepperProps {
+  fillProgress: number
+  hasGenerated: boolean
+  isStale: boolean
+  isCompleted: boolean
+  canGenerate: boolean
+  canComplete: boolean
+  onGenerateClick: () => void
+  onCompleteClick: () => void
+  generating: boolean
+  completing: boolean
+}
+
+function WorkflowStepper({
+  fillProgress,
+  hasGenerated,
+  isStale,
+  isCompleted,
+  canGenerate,
+  canComplete,
+  onGenerateClick,
+  onCompleteClick,
+  generating,
+  completing,
+}: WorkflowStepperProps) {
+  // Determine step statuses
+  const startStatus: StepStatus = 'done' // Always done if viewing in_progress
+  const fillStatus: StepStatus = fillProgress >= 100 ? 'done' : 'active'
+  const generateStatus: StepStatus = isCompleted
+    ? 'done'
+    : hasGenerated && !isStale
+    ? 'done'
+    : isStale
+    ? 'warning'
+    : 'pending'
+  const completeStatus: StepStatus = isCompleted
+    ? 'done'
+    : canComplete
+    ? 'active'
+    : 'locked'
+
+  const steps: {
+    label: string
+    hint: string
+    status: StepStatus
+    actionLabel?: string
+    onAction?: () => void
+    loading?: boolean
+  }[] = [
+    { label: 'Start', hint: 'Survey started', status: startStatus },
+    { label: 'Fill Sections', hint: `${Math.round(fillProgress)}% complete`, status: fillStatus },
+    {
+      label: 'Generate RR',
+      hint: isStale ? 'Needs regeneration' : hasGenerated ? 'Requirements ready' : 'Not generated',
+      status: generateStatus,
+      actionLabel: generating ? 'Generating...' : isStale ? 'Regenerate' : hasGenerated ? 'Regenerate' : 'Generate',
+      onAction: canGenerate ? onGenerateClick : undefined,
+      loading: generating,
+    },
+    {
+      label: 'Complete',
+      hint: isCompleted ? 'Survey completed' : canComplete ? 'Ready to complete' : 'Pending requirements',
+      status: completeStatus,
+      actionLabel: completing ? 'Completing...' : 'Complete',
+      onAction: canComplete ? onCompleteClick : undefined,
+      loading: completing,
+    },
+  ]
+
+  const statusStyles: Record<StepStatus, { circle: string; text: string; line: string }> = {
+    done: {
+      circle: 'bg-status-success text-white border-status-success',
+      text: 'text-status-success',
+      line: 'bg-status-success',
+    },
+    active: {
+      circle: 'bg-brand-600 text-white border-brand-600 ring-4 ring-brand-100',
+      text: 'text-brand-600',
+      line: 'bg-app-border',
+    },
+    warning: {
+      circle: 'bg-status-warning text-white border-status-warning ring-4 ring-amber-100',
+      text: 'text-status-warning',
+      line: 'bg-app-border',
+    },
+    pending: {
+      circle: 'bg-app-surface text-app-subtle border-app-border border-2',
+      text: 'text-app-subtle',
+      line: 'bg-app-border',
+    },
+    locked: {
+      circle: 'bg-app-muted text-app-subtle border-app-border border-2 opacity-50',
+      text: 'text-app-subtle opacity-50',
+      line: 'bg-app-border',
+    },
+  }
+
+  return (
+    <div className="w-full py-4">
+      {/* Desktop: Horizontal stepper - full width */}
+      <div className="hidden md:flex items-start w-full">
+        {steps.map((step, idx) => {
+          const style = statusStyles[step.status]
+          const isLast = idx === steps.length - 1
+
+          return (
+            <div key={step.label} className={`flex items-start ${isLast ? '' : 'flex-1'}`}>
+              {/* Step content */}
+              <div className="flex flex-col items-center text-center shrink-0 w-24">
+                {/* Circle */}
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-full transition-all ${style.circle}`}
+                >
+                  {step.status === 'done' ? (
+                    <Check className="h-5 w-5" />
+                  ) : step.status === 'warning' ? (
+                    <AlertCircle className="h-5 w-5" />
+                  ) : step.loading ? (
+                    <Spinner className="h-5 w-5" />
+                  ) : (
+                    <span className="text-sm font-bold">{idx + 1}</span>
+                  )}
+                </div>
+                {/* Label */}
+                <p className={`mt-2 text-xs font-semibold whitespace-nowrap ${style.text}`}>{step.label}</p>
+                {/* Hint */}
+                <p className="mt-0.5 text-[10px] text-app-subtle leading-tight whitespace-nowrap">{step.hint}</p>
+                {/* Action button */}
+                {step.onAction && !step.loading && (
+                  <button
+                    type="button"
+                    onClick={step.onAction}
+                    className={`mt-2 text-[10px] font-semibold px-3 py-1 rounded-full transition-colors ${
+                      step.status === 'warning'
+                        ? 'bg-status-warning/10 text-status-warning hover:bg-status-warning/20'
+                        : 'bg-brand-50 text-brand-600 hover:bg-brand-100'
+                    }`}
+                  >
+                    {step.actionLabel}
+                  </button>
+                )}
+              </div>
+              {/* Connector line */}
+              {!isLast && (
+                <div className="flex-1 flex items-center px-3 mt-5">
+                  <div
+                    className={`h-0.5 w-full rounded-full transition-colors ${
+                      step.status === 'done' ? style.line : 'bg-app-border'
+                    }`}
+                  />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Tablet/Mobile: Compact horizontal */}
+      <div className="md:hidden">
+        <div className="flex items-center justify-between mb-3">
+          {steps.map((step, idx) => {
+            const style = statusStyles[step.status]
+            const isLast = idx === steps.length - 1
+
+            return (
+              <div key={step.label} className="flex items-center flex-1">
+                <div
+                  className={`flex h-9 w-9 items-center justify-center rounded-full transition-all shrink-0 ${style.circle}`}
+                >
+                  {step.status === 'done' ? (
+                    <Check className="h-4 w-4" />
+                  ) : step.status === 'warning' ? (
+                    <AlertCircle className="h-4 w-4" />
+                  ) : step.loading ? (
+                    <Spinner className="h-4 w-4" />
+                  ) : (
+                    <span className="text-xs font-bold">{idx + 1}</span>
+                  )}
+                </div>
+                {!isLast && (
+                  <div
+                    className={`flex-1 h-0.5 mx-1 rounded-full ${
+                      step.status === 'done' ? style.line : 'bg-app-border'
+                    }`}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {/* Current step info */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-app-heading truncate">
+              {steps.find((s) => s.status === 'active' || s.status === 'warning')?.label ?? 'Complete'}
+            </p>
+            <p className="text-xs text-app-subtle">
+              {steps.find((s) => s.status === 'active' || s.status === 'warning')?.hint ?? 'All steps done'}
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {canGenerate && (
+              <button
+                type="button"
+                onClick={onGenerateClick}
+                disabled={generating}
+                className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                  isStale
+                    ? 'bg-status-warning/10 text-status-warning'
+                    : 'bg-app-muted text-app-secondary hover:bg-app-border'
+                }`}
+              >
+                {generating ? 'Generating...' : isStale ? 'Regenerate' : 'Generate'}
+              </button>
+            )}
+            {canComplete && (
+              <button
+                type="button"
+                onClick={onCompleteClick}
+                disabled={completing}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700"
+              >
+                {completing ? 'Completing...' : 'Complete'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function SiteSurveyWorkspacePage() {
@@ -347,6 +606,7 @@ export function SiteSurveyWorkspacePage() {
   const location = useLocation()
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
   const canUpdate = hasAnyCapability(meCaps, [CAP.SALES_SURVEY_UPDATE])
+  const canAssignSurveyOwner = hasAnyCapability(meCaps, [CAP.SALES_SURVEY_ASSIGN])
 
   // ─── State ────────────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true)
@@ -369,11 +629,18 @@ export function SiteSurveyWorkspacePage() {
   const [assignUsersLoading, setAssignUsersLoading] = useState(false)
   const [generateResult, setGenerateResult] = useState<GenerateRoleRequirementsResult | null>(null)
   const [roleMappings, setRoleMappings] = useState<SurveyRoleMapping[]>([])
+  const [generatedRoleRequirements, setGeneratedRoleRequirements] = useState<SalesRoleRequirement[]>([])
+  const [roleRequirementsLoading, setRoleRequirementsLoading] = useState(false)
+  const [roleRequirementsError, setRoleRequirementsError] = useState<string | null>(null)
+  const [roleRequirementsStale, setRoleRequirementsStale] = useState(false)
 
   const [addDeploymentOpen, setAddDeploymentOpen] = useState(false)
   const [addLocationOpen, setAddLocationOpen] = useState(false)
   const [addEquipmentOpen, setAddEquipmentOpen] = useState(false)
   const [addIssueOpen, setAddIssueOpen] = useState(false)
+  const [jobRoles, setJobRoles] = useState<JobRoleRow[]>([])
+  const [jobRolesLoading, setJobRolesLoading] = useState(false)
+  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('')
 
   const seededRef = useRef(false)
 
@@ -424,14 +691,17 @@ export function SiteSurveyWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surveyId])
 
+  // Load eligible users for survey assignment (only if user can assign)
   useEffect(() => {
-    if (!canUpdate) return
+    if (!canAssignSurveyOwner) return
+    const leadId = data?.survey.lead
+    if (!leadId) return
     setAssignUsersLoading(true)
-    listUsers({ user_type: 'internal', is_active: true, page: 1 })
+    listEligibleOperationsOwnersForLead(leadId)
       .then((res) => setAssignUsers(res.items))
       .catch(() => setAssignUsers([]))
       .finally(() => setAssignUsersLoading(false))
-  }, [canUpdate])
+  }, [canAssignSurveyOwner, data?.survey.lead])
 
   // Load active role mappings once survey loads
   useEffect(() => {
@@ -439,6 +709,35 @@ export function SiteSurveyWorkspacePage() {
       .then((res) => setRoleMappings(res.items))
       .catch(() => setRoleMappings([]))
   }, [])
+
+  // Load job roles when add deployment modal opens
+  useEffect(() => {
+    if (!addDeploymentOpen) return
+    setJobRolesLoading(true)
+    listJobRoles({ is_active: true })
+      .then((res) => setJobRoles(res.items))
+      .catch(() => setJobRoles([]))
+      .finally(() => setJobRolesLoading(false))
+  }, [addDeploymentOpen])
+
+  // Load generated role requirements for this survey
+  const loadRoleRequirements = useCallback(async () => {
+    setRoleRequirementsLoading(true)
+    setRoleRequirementsError(null)
+    try {
+      const res = await listSalesRoleRequirements({ survey: surveyId })
+      setGeneratedRoleRequirements(res.items)
+    } catch {
+      setGeneratedRoleRequirements([])
+      setRoleRequirementsError('Could not verify generated role requirements. Backend will still validate completion.')
+    } finally {
+      setRoleRequirementsLoading(false)
+    }
+  }, [surveyId])
+
+  useEffect(() => {
+    void loadRoleRequirements()
+  }, [loadRoleRequirements])
 
   // Helper to find mapping for a deployment row
   function findMappingForRow(description?: string): SurveyRoleMapping | null {
@@ -504,6 +803,24 @@ export function SiteSurveyWorkspacePage() {
       const updated = await updateSiteSurveyShiftDeployment(rowId, payload)
       setShiftDeployments((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
       setSaving(key, false, null, true)
+      const affectsGeneratedRequirements = [
+        'description',
+        'job_role',
+        'general_count',
+        'first_shift_count',
+        'second_shift_count',
+        'night_shift_count',
+        'is_applicable',
+        'line_type',
+      ].some((field) => field in payload)
+      if (affectsGeneratedRequirements) {
+        setGeneratedRoleRequirements((prev) => {
+          if (prev.some((r) => r.survey === surveyId && r.is_active !== false && r.created_from_survey === true)) {
+            setRoleRequirementsStale(true)
+          }
+          return prev
+        })
+      }
     } catch (e: unknown) {
       setSaving(key, false, parseApiError(e, 'Save failed').message)
     }
@@ -567,7 +884,12 @@ export function SiteSurveyWorkspacePage() {
       const updated = await markSiteSurveyCompleted(surveyId)
       setData((prev) => (prev ? { ...prev, survey: updated } : prev))
     } catch (e: unknown) {
-      setActionError(parseApiError(e, 'Action failed').message)
+      const errorMsg = parseApiError(e, 'Action failed').message
+      setActionError(errorMsg)
+      // If backend says to regenerate role requirements, mark as stale
+      if (errorMsg.toLowerCase().includes('regenerate role requirements')) {
+        setRoleRequirementsStale(true)
+      }
     } finally {
       setActionBusy(null)
     }
@@ -596,6 +918,10 @@ export function SiteSurveyWorkspacePage() {
     try {
       const result = await generateRoleRequirementsFromSurvey(surveyId)
       setGenerateResult(result)
+      // Reload role requirements to get current state
+      await loadRoleRequirements()
+      // Clear stale flag after successful regeneration
+      setRoleRequirementsStale(false)
     } catch (e: unknown) {
       setActionError(parseApiError(e, 'Generation failed').message)
     } finally {
@@ -605,19 +931,24 @@ export function SiteSurveyWorkspacePage() {
 
   // ─── Add Row Handlers ─────────────────────────────────────────────────────────
 
-  async function handleAddDeployment(description: string) {
+  async function handleAddDeploymentRole(jobRoleId: number) {
     try {
       const created = await createSiteSurveyShiftDeployment({
         survey: surveyId,
-        description,
+        job_role: jobRoleId,
+        general_count: 0,
+        first_shift_count: 0,
+        second_shift_count: 0,
+        night_shift_count: 0,
         line_type: 'item',
         is_applicable: true,
         sort_order: shiftDeployments.length + 1,
       })
       setShiftDeployments((prev) => [...prev, created])
       setAddDeploymentOpen(false)
+      setSelectedJobRoleId('')
     } catch (e: unknown) {
-      setActionError(parseApiError(e, 'Failed to add row').message)
+      setActionError(parseApiError(e, 'Failed to add role').message)
     }
   }
 
@@ -699,6 +1030,30 @@ export function SiteSurveyWorkspacePage() {
   const missingMappings = mappableDeployments.filter((r) => findMappingForRow(r.description) === null)
   const ignoredDeployments = applicableDeployments.filter((r) => isRoleMappingIgnored(r.description))
 
+  // ─── Completion Readiness ────────────────────────────────────────────────────
+
+  // Active role requirements generated from this survey
+  const activeGeneratedRequirements = generatedRoleRequirements.filter(
+    (r) => r.survey === surveyId && r.is_active !== false && r.created_from_survey === true
+  )
+  const hasGeneratedRoleRequirements = activeGeneratedRequirements.length > 0
+
+  // Blocking errors from last generation attempt (only blocks in current session)
+  const hasBlockingGenerationErrors = Boolean(generateResult?.errors.length)
+
+  // Role requirements need regeneration (deployment changed after generation)
+  const roleRequirementsNeedRegeneration = roleRequirementsStale
+
+  // Overall completion readiness
+  const canCompleteSurvey =
+    data?.survey.status === 'in_progress' &&
+    hasGeneratedRoleRequirements &&
+    !hasBlockingGenerationErrors &&
+    !roleRequirementsNeedRegeneration
+
+  // Overall fill progress (average of 5 sections, weighted equally)
+  const overallFillProgress = (scopePercent + deploymentPercent + locationPercent + equipmentPercent + issuePercent) / 5
+
   // ─── Tab Content ──────────────────────────────────────────────────────────────
 
   function groupByCategory(answers: SiteSurveyScopeAnswer[]): [string, SiteSurveyScopeAnswer[]][] {
@@ -712,49 +1067,76 @@ export function SiteSurveyWorkspacePage() {
   }
 
   const scopeTab = (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {scopeAnswers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="rounded-full bg-app-muted p-3 mb-3">
-            <ClipboardCheck className="h-6 w-6 text-app-subtle" />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="rounded-2xl bg-gradient-to-br from-brand-100 to-brand-50 p-5 mb-4 shadow-sm">
+            <ClipboardCheck className="h-8 w-8 text-brand-600" />
           </div>
-          <p className="text-sm text-app-secondary">Loading survey questions...</p>
+          <p className="text-base font-medium text-app-secondary">Loading survey questions...</p>
+          <p className="mt-1 text-sm text-app-subtle">Please wait while we prepare the form</p>
         </div>
       ) : (
-        groupByCategory(scopeAnswers).map(([cat, answers]) => (
-          <SectionCard
-            key={cat}
-            title={SCOPE_CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-          >
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {answers.map((a) => {
-                const isLong = (a.field_label?.length ?? 0) > 30 || a.field_key.includes('address') || a.field_key.includes('details') || a.field_key.includes('scope') || a.field_key.includes('others')
-                return (
-                  <div key={a.id} className={isLong ? 'sm:col-span-2 lg:col-span-3' : ''}>
-                    <div className="flex items-start justify-between gap-2">
-                      <FormField
-                        label={a.field_label ?? a.field_key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                        value={a.value_text ?? ''}
-                        onChange={(val) => {
-                          setScopeAnswers((prev) =>
-                            prev.map((x) => (x.id === a.id ? { ...x, value_text: val } : x)),
-                          )
-                        }}
-                        onBlur={() => void saveScopeAnswer(a.id, scopeAnswers.find((x) => x.id === a.id)?.value_text ?? null)}
-                        multiline={isLong}
-                        disabled={!canUpdate}
-                        className="flex-1"
-                      />
-                      <div className="pt-6">
-                        <SaveIndicator state={saveStates[`scope-${a.id}`]} />
+        <>
+          {/* Progress indicator */}
+          <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-brand-50 to-transparent dark:from-brand-900/20 border border-brand-100 dark:border-brand-800/30 px-5 py-4">
+            <div className="flex items-center justify-center">
+              <ProgressRing percent={scopePercent} size={48} />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-app-heading">Scope Details Progress</p>
+              <p className="text-xs text-app-secondary mt-0.5">
+                {scopeFilledCount} of {scopeTotal} fields completed
+              </p>
+            </div>
+            {scopePercent === 100 && (
+              <div className="flex items-center gap-1.5 text-status-success">
+                <CheckCircle2 className="h-5 w-5" />
+                <span className="text-sm font-medium">Complete</span>
+              </div>
+            )}
+          </div>
+
+          {/* Form sections */}
+          {groupByCategory(scopeAnswers).map(([cat, answers], idx) => (
+            <SectionCard
+              key={cat}
+              title={SCOPE_CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+              accent={idx === 0 ? 'brand' : 'neutral'}
+            >
+              <div className="grid gap-5 sm:grid-cols-2">
+                {answers.map((a) => {
+                  const isLong = (a.field_label?.length ?? 0) > 30 || a.field_key.includes('address') || a.field_key.includes('details') || a.field_key.includes('scope') || a.field_key.includes('others')
+                  const saveState = saveStates[`scope-${a.id}`]
+                  return (
+                    <div key={a.id} className={isLong ? 'sm:col-span-2' : ''}>
+                      <div className="relative">
+                        <FormField
+                          label={a.field_label ?? a.field_key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                          value={a.value_text ?? ''}
+                          onChange={(val) => {
+                            setScopeAnswers((prev) =>
+                              prev.map((x) => (x.id === a.id ? { ...x, value_text: val } : x)),
+                            )
+                          }}
+                          onBlur={() => void saveScopeAnswer(a.id, scopeAnswers.find((x) => x.id === a.id)?.value_text ?? null)}
+                          multiline={isLong}
+                          disabled={!canUpdate}
+                          className="flex-1"
+                        />
+                        {saveState && (
+                          <div className="absolute top-0 right-0">
+                            <SaveIndicator state={saveState} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
-          </SectionCard>
-        ))
+                  )
+                })}
+              </div>
+            </SectionCard>
+          ))}
+        </>
       )}
     </div>
   )
@@ -766,16 +1148,17 @@ export function SiteSurveyWorkspacePage() {
           <p className="text-sm text-app-secondary py-6 text-center">No deployment rows configured.</p>
         ) : (
           <div className="overflow-x-auto -mx-4">
-            <table className="w-full min-w-[800px]">
+            <table className="w-full min-w-[900px]">
               <thead>
                 <tr className="border-b border-app-border bg-app-muted/30">
                   <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-16"></th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider">Role / Description</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">General</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">Shift 1</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">Shift 2</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">Total</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-36">Remarks</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">General</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 1</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 2</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Night</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Total</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-32">Remarks</th>
                   <th className="px-3 py-2 w-14"></th>
                 </tr>
               </thead>
@@ -790,7 +1173,7 @@ export function SiteSurveyWorkspacePage() {
                   if (isHeader) {
                     return (
                       <tr key={row.id} className="bg-brand-50/50">
-                        <td colSpan={8} className="px-3 py-2">
+                        <td colSpan={9} className="px-3 py-2">
                           <span className="text-sm font-semibold text-brand-700">{row.description}</span>
                         </td>
                       </tr>
@@ -802,19 +1185,21 @@ export function SiteSurveyWorkspacePage() {
                       <tr key={row.id} className="bg-app-muted/50 font-medium">
                         <td className="px-3 py-2"></td>
                         <td className="px-3 py-2 text-sm text-app-text">{row.description}</td>
-                        <td className="px-3 py-2 text-center text-sm">{row.general_count ?? '—'}</td>
-                        <td className="px-3 py-2 text-center text-sm">{row.first_shift_count ?? '—'}</td>
-                        <td className="px-3 py-2 text-center text-sm">{row.second_shift_count ?? '—'}</td>
-                        <td className="px-3 py-2 text-center text-sm font-semibold">{row.total_count ?? '—'}</td>
+                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.general_count)}</td>
+                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.first_shift_count)}</td>
+                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.second_shift_count)}</td>
+                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.night_shift_count)}</td>
+                        <td className="px-3 py-2 text-center text-sm font-semibold">{formatHeadcount(row.total_count)}</td>
                         <td className="px-3 py-2"></td>
                         <td className="px-3 py-2"></td>
                       </tr>
                     )
                   }
 
-                  // Determine mapping status for this row
+                  // Determine mapping/role status for this row
+                  const hasLinkedRole = Boolean(row.job_role)
                   const isIgnored = isRoleMappingIgnored(row.description)
-                  const mapping = !isIgnored ? findMappingForRow(row.description) : null
+                  const mapping = !hasLinkedRole && !isIgnored ? findMappingForRow(row.description) : null
 
                   return (
                     <tr key={row.id} className={`${!applicable ? 'bg-app-muted/30 opacity-60' : 'hover:bg-app-muted/20'} transition-colors`}>
@@ -831,15 +1216,21 @@ export function SiteSurveyWorkspacePage() {
                       </td>
                       <td className="px-3 py-2">
                         <div>
-                          <p className="text-sm text-app-text">{row.description ?? row.job_role_name ?? '—'}</p>
+                          <p className="text-sm text-app-text">{row.job_role_name ?? row.description ?? '—'}</p>
+                          {row.job_role_code && <p className="text-xs text-app-subtle">{row.job_role_code}</p>}
                           {row.shift_label ? <p className="text-xs text-app-subtle">{row.shift_label}</p> : null}
                           {!applicable && row.not_applicable_reason ? (
                             <p className="text-xs text-app-subtle italic mt-0.5">{row.not_applicable_reason}</p>
                           ) : null}
-                          {/* Mapping status badge */}
+                          {/* Role/Mapping status badge */}
                           {applicable && (
                             <div className="mt-1">
-                              {isIgnored ? (
+                              {hasLinkedRole ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-status-success">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Role linked
+                                </span>
+                              ) : isIgnored ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] text-app-subtle">
                                   <Info className="h-3 w-3" />
                                   Template row
@@ -868,10 +1259,10 @@ export function SiteSurveyWorkspacePage() {
                             value={row.general_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, general_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { general_count: v })}
-                            min={0}
+
                           />
                         ) : (
-                          <span className="block text-center text-sm text-app-secondary">{row.general_count ?? '—'}</span>
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.general_count)}</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -880,10 +1271,10 @@ export function SiteSurveyWorkspacePage() {
                             value={row.first_shift_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, first_shift_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { first_shift_count: v })}
-                            min={0}
+
                           />
                         ) : (
-                          <span className="block text-center text-sm text-app-secondary">{row.first_shift_count ?? '—'}</span>
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.first_shift_count)}</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -892,24 +1283,27 @@ export function SiteSurveyWorkspacePage() {
                             value={row.second_shift_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, second_shift_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { second_shift_count: v })}
-                            min={0}
+
                           />
                         ) : (
-                          <span className="block text-center text-sm text-app-secondary">{row.second_shift_count ?? '—'}</span>
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.second_shift_count)}</span>
                         )}
                       </td>
                       <td className="px-3 py-2">
                         {editable && applicable ? (
                           <NumberInput
-                            value={row.total_count}
-                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, total_count: v } : r))}
-                            onBlur={(v) => void saveDeploymentField(row.id, { total_count: v })}
-                            min={0}
-                            className="font-medium"
+                            value={row.night_shift_count}
+                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, night_shift_count: v } : r))}
+                            onBlur={(v) => void saveDeploymentField(row.id, { night_shift_count: v })}
+
                           />
                         ) : (
-                          <span className="block text-center text-sm font-medium text-app-text">{row.total_count ?? '—'}</span>
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.night_shift_count)}</span>
                         )}
+                      </td>
+                      {/* Total - display only, calculated by backend */}
+                      <td className="px-3 py-2">
+                        <span className="block text-center text-sm font-medium text-app-text">{formatHeadcount(row.total_count)}</span>
                       </td>
                       <td className="px-3 py-2">
                         {editable && applicable ? (
@@ -938,13 +1332,48 @@ export function SiteSurveyWorkspacePage() {
         {canUpdate ? (
           <div className="mt-4">
             {addDeploymentOpen ? (
-              <AddRowForm
-                placeholder="Role or deployment description"
-                onCancel={() => setAddDeploymentOpen(false)}
-                onAdd={(val) => void handleAddDeployment(val)}
-              />
+              <div className="rounded-lg border border-app-border bg-app-muted/30 p-4">
+                <p className="text-sm font-medium text-app-heading mb-3">Add Role to Deployment</p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <select
+                    value={selectedJobRoleId}
+                    onChange={(e) => setSelectedJobRoleId(e.target.value)}
+                    disabled={jobRolesLoading}
+                    className="flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  >
+                    <option value="">{jobRolesLoading ? 'Loading roles...' : 'Select a job role...'}</option>
+                    {jobRoles.map((role) => (
+                      <option key={role.id} value={String(role.id)}>
+                        {role.name} ({role.code}) — {role.skill_category_display ?? role.skill_category}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setAddDeploymentOpen(false)
+                        setSelectedJobRoleId('')
+                      }}
+                      className="min-h-9 px-3 text-sm"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        const roleId = Number(selectedJobRoleId)
+                        if (roleId) void handleAddDeploymentRole(roleId)
+                      }}
+                      disabled={!selectedJobRoleId}
+                      className="min-h-9 px-3 text-sm"
+                    >
+                      Add Role
+                    </Button>
+                  </div>
+                </div>
+              </div>
             ) : (
-              <AddRowButton onClick={() => setAddDeploymentOpen(true)} label="Add deployment row" />
+              <AddRowButton onClick={() => setAddDeploymentOpen(true)} label="Add role" />
             )}
           </div>
         ) : null}
@@ -1010,7 +1439,7 @@ export function SiteSurveyWorkspacePage() {
                             value={row.present_count}
                             onChange={(v) => setLocationLines((prev) => prev.map((r) => r.id === row.id ? { ...r, present_count: v } : r))}
                             onBlur={(v) => void saveLocationField(row.id, { present_count: v })}
-                            min={0}
+
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{row.present_count ?? '—'}</span>
@@ -1022,7 +1451,7 @@ export function SiteSurveyWorkspacePage() {
                             value={row.proposed_count}
                             onChange={(v) => setLocationLines((prev) => prev.map((r) => r.id === row.id ? { ...r, proposed_count: v } : r))}
                             onBlur={(v) => void saveLocationField(row.id, { proposed_count: v })}
-                            min={0}
+
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{row.proposed_count ?? '—'}</span>
@@ -1153,7 +1582,7 @@ export function SiteSurveyWorkspacePage() {
                               value={row.unit_count}
                               onChange={(v) => setEquipmentLines((prev) => prev.map((r) => r.id === row.id ? { ...r, unit_count: v } : r))}
                               onBlur={(v) => void saveEquipmentField(row.id, { unit_count: v })}
-                              min={0}
+  
                             />
                           ) : (
                             <span className="block text-center text-sm text-app-secondary">{row.unit_count ?? '—'}</span>
@@ -1179,7 +1608,6 @@ export function SiteSurveyWorkspacePage() {
                               value={row.amortisation_months}
                               onChange={(v) => setEquipmentLines((prev) => prev.map((r) => r.id === row.id ? { ...r, amortisation_months: v } : r))}
                               onBlur={(v) => void saveEquipmentField(row.id, { amortisation_months: v })}
-                              min={1}
                             />
                           ) : (
                             <span className="block text-center text-sm text-app-secondary">{row.amortisation_months ?? '—'}</span>
@@ -1308,35 +1736,55 @@ export function SiteSurveyWorkspacePage() {
         </div>
       </SectionCard>
 
-      {/* Assign Owner */}
-      {canUpdate ? (
-        <SectionCard title="Survey Assignment">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-app-secondary mb-1.5">Assign to</label>
-              <select
-                value={assignUserId}
-                onChange={(e) => setAssignUserId(e.target.value)}
-                disabled={assignUsersLoading}
-                className="w-full rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-              >
-                <option value="">{assignUsersLoading ? 'Loading...' : 'Select user...'}</option>
-                {assignUsers.map((u) => (
-                  <option key={u.id} value={String(u.id)}>
-                    {u.username}{u.department_name ? ` — ${u.department_name}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-end">
-              <Button
-                variant="secondary"
-                disabled={actionBusy !== null || !assignUserId}
-                onClick={() => void handleAssignOwner()}
-              >
-                {actionBusy === 'assign' ? 'Assigning...' : 'Assign'}
-              </Button>
-            </div>
+      {/* Survey Owner - only visible to users with assign capability */}
+      {canAssignSurveyOwner ? (
+        <SectionCard
+          title="Survey Owner"
+          description="Assign or reassign the operations owner for this site survey."
+        >
+          <div className="space-y-3">
+            {assignUsersLoading ? (
+              <div className="flex items-center gap-2 text-sm text-app-secondary">
+                <Spinner className="h-4 w-4" />
+                <span>Loading eligible users...</span>
+              </div>
+            ) : assignUsers.length === 0 ? (
+              <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-status-warning mt-0.5 shrink-0" />
+                  <p className="text-sm text-app-text">
+                    No eligible users available. Create an active org-level Operations department and assign internal users to it.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-app-secondary mb-1.5">Assign to</label>
+                  <select
+                    value={assignUserId}
+                    onChange={(e) => setAssignUserId(e.target.value)}
+                    className="w-full rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  >
+                    <option value="">Select user...</option>
+                    {assignUsers.map((u) => (
+                      <option key={u.id} value={String(u.id)}>
+                        {u.username}{u.department_name ? ` — ${u.department_name}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    variant="secondary"
+                    disabled={actionBusy !== null || !assignUserId}
+                    onClick={() => void handleAssignOwner()}
+                  >
+                    {actionBusy === 'assign' ? 'Assigning...' : 'Assign'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </SectionCard>
       ) : null}
@@ -1401,75 +1849,235 @@ export function SiteSurveyWorkspacePage() {
       </SectionCard>
 
       {/* Generate Role Requirements */}
-      <SectionCard title="Generate Role Requirements" description="Convert deployment data into role requirements for the proposal">
+      <SectionCard
+        title="Generate Role Requirements"
+        description="Converts deployment headcount into proposal-ready role requirements. Required before completing the survey."
+      >
         <div className="space-y-4">
-          {missingMappings.length > 0 ? (
-            <div className="rounded-lg border border-status-warning/20 bg-status-warning/5 p-2 mb-2">
-              <p className="text-xs text-status-warning">
-                <AlertCircle className="h-3 w-3 inline mr-1" />
-                Some rows may fail due to missing role mappings.
-              </p>
+          {/* Helper text */}
+          <p className="text-sm text-app-secondary">
+            This step maps your deployment rows to job roles and creates requirements for the proposal.
+            Survey completion is locked until this step is done.
+          </p>
+
+          {/* Role requirements error warning */}
+          {roleRequirementsError && (
+            <div className="rounded-lg border border-status-warning/20 bg-status-warning/5 p-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-status-warning" />
+                <p className="text-sm text-app-text">{roleRequirementsError}</p>
+              </div>
             </div>
-          ) : null}
+          )}
+
+          {/* Already generated indicator */}
+          {hasGeneratedRoleRequirements && !generateResult && !roleRequirementsStale && (
+            <div className="rounded-lg border border-status-success/30 bg-status-success/5 p-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-status-success" />
+                <p className="text-sm text-app-text">
+                  {activeGeneratedRequirements.length} role requirement{activeGeneratedRequirements.length !== 1 ? 's' : ''} already generated.
+                  You can regenerate to update.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Stale warning - deployment changed after generation */}
+          {roleRequirementsStale && hasGeneratedRoleRequirements && (
+            <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-status-warning mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-app-text">
+                    Deployment changed since last generation
+                  </p>
+                  <p className="text-xs text-app-secondary mt-0.5">
+                    Regenerate role requirements to reflect the latest deployment data before completing the survey.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Missing mappings warning */}
+          {missingMappings.length > 0 && (
+            <div className="rounded-lg border border-status-warning/20 bg-status-warning/5 p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-status-warning mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-app-text">
+                    {missingMappings.length} deployment row{missingMappings.length !== 1 ? 's' : ''} need role mapping
+                  </p>
+                  <p className="text-xs text-app-secondary mt-0.5">
+                    These rows will fail during generation until mappings are configured.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Generate button */}
           <Button
             variant="secondary"
             onClick={() => void handleGenerateRoles()}
             disabled={actionBusy !== null || data?.survey.status !== 'in_progress'}
           >
-            {actionBusy === 'generate' ? 'Generating...' : 'Generate Role Requirements'}
+            {actionBusy === 'generate' ? 'Generating...' :
+             hasGeneratedRoleRequirements ? 'Regenerate Role Requirements' : 'Generate Role Requirements'}
           </Button>
-          {generateResult ? (
-            <div className={`rounded-xl border p-4 ${generateResult.errors.length > 0 ? 'border-status-warning/30 bg-status-warning/5' : 'border-status-success/30 bg-status-success/5'}`}>
-              <div className="flex items-start gap-3">
-                {generateResult.errors.length > 0 ? (
-                  <AlertCircle className="h-5 w-5 text-status-warning mt-0.5" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5 text-status-success mt-0.5" />
-                )}
-                <div className="space-y-2">
-                  {generateResult.created.length > 0 ? (
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-app-text">
-                        Generated {generateResult.created.length} requirement{generateResult.created.length !== 1 ? 's' : ''}
-                      </p>
-                      <ul className="space-y-0.5">
-                        {generateResult.created.map((row) => (
-                          <li key={row.sales_role_requirement_id} className="text-xs text-app-secondary">
-                            {row.description} → {row.manpower_count} manpower{row.service_category ? ` · ${row.service_category}` : ''}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {generateResult.skipped.length > 0 ? (
-                    <details className="text-xs text-app-secondary">
-                      <summary>{generateResult.skipped.length} skipped</summary>
-                      <ul className="mt-1 space-y-0.5">
-                        {generateResult.skipped.map((row, i) => (
-                          <li key={`${row.description}-${row.reason}-${i}`}>
-                            {roleGenerationReasonLabel(row.reason, row.description)}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                  {generateResult.errors.length > 0 ? (
-                    <div className="mt-2 space-y-1.5">
-                      <p className="text-xs font-medium text-status-danger">Issues encountered:</p>
-                      <ul className="space-y-1">
-                        {generateResult.errors.map((row, i) => (
-                          <li key={`${row.description}-${row.reason}-${i}`} className="text-xs text-status-danger flex items-start gap-1">
-                            <span className="text-status-danger mt-0.5">•</span>
-                            <span>{roleGenerationReasonLabel(row.reason, row.description)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
+          {/* Generation Result */}
+          {generateResult ? (() => {
+            const hasCreated = generateResult.created.length > 0
+            const hasUpdated = (generateResult.updated?.length ?? 0) > 0
+            const hasSkipped = generateResult.skipped.length > 0
+            const hasErrors = generateResult.errors.length > 0
+            const totalProcessed = generateResult.created.length + (generateResult.updated?.length ?? 0)
+            const isSuccess = totalProcessed > 0 && !hasErrors
+
+            return (
+              <div className="space-y-4">
+                {/* Status Banner */}
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+                  hasErrors
+                    ? 'bg-status-danger/10 text-status-danger'
+                    : isSuccess
+                    ? 'bg-status-success/10 text-status-success'
+                    : 'bg-app-muted text-app-secondary'
+                }`}>
+                  {hasErrors ? (
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                  ) : isSuccess ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <Info className="h-4 w-4 shrink-0" />
+                  )}
+                  <span className="font-medium">
+                    {hasErrors
+                      ? `${generateResult.errors.length} failed — fix mappings and regenerate`
+                      : isSuccess
+                      ? `${totalProcessed} role requirement${totalProcessed !== 1 ? 's' : ''} processed`
+                      : 'No changes made'}
+                  </span>
                 </div>
+
+                {/* Created Table */}
+                {hasCreated && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-status-success mb-2">
+                      Created ({generateResult.created.length})
+                    </h4>
+                    <div className="rounded-lg border border-app-border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-app-muted/50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-app-secondary">Count</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-app-border">
+                          {generateResult.created.map((row) => (
+                            <tr key={row.sales_role_requirement_id}>
+                              <td className="px-3 py-2 text-app-text">{row.description}</td>
+                              <td className="px-3 py-2 text-right text-app-text font-medium">{row.manpower_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Updated Table */}
+                {hasUpdated && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-2">
+                      Updated ({generateResult.updated?.length ?? 0})
+                    </h4>
+                    <div className="rounded-lg border border-app-border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-app-muted/50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-app-secondary">Count</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-app-border">
+                          {generateResult.updated?.map((row) => (
+                            <tr key={row.sales_role_requirement_id}>
+                              <td className="px-3 py-2 text-app-text">{row.description}</td>
+                              <td className="px-3 py-2 text-right text-app-text font-medium">{row.manpower_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Errors Table */}
+                {hasErrors && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-status-danger mb-2">
+                      Failed ({generateResult.errors.length})
+                    </h4>
+                    <div className="rounded-lg border border-status-danger/30 overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-status-danger/5">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-status-danger">Role</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-status-danger">Issue</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-status-danger/20">
+                          {generateResult.errors.map((row, i) => (
+                            <tr key={`${row.description}-${row.reason}-${i}`} className="bg-status-danger/5">
+                              <td className="px-3 py-2 text-app-text">{row.description}</td>
+                              <td className="px-3 py-2 text-status-danger">{roleGenerationReasonLabel(row.reason, row.description)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Skipped Table */}
+                {hasSkipped && (
+                  <details>
+                    <summary className="text-xs font-semibold uppercase tracking-wider text-app-subtle cursor-pointer hover:text-app-secondary mb-2">
+                      Skipped ({generateResult.skipped.length}) — click to view
+                    </summary>
+                    <div className="rounded-lg border border-app-border overflow-hidden mt-2">
+                      <table className="w-full text-sm">
+                        <thead className="bg-app-muted/50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Role</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-app-secondary">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-app-border">
+                          {generateResult.skipped.map((row, i) => (
+                            <tr key={`${row.description}-${row.reason}-${i}`}>
+                              <td className="px-3 py-2 text-app-secondary">{row.description}</td>
+                              <td className="px-3 py-2 text-app-subtle">{roleGenerationReasonLabel(row.reason, row.description)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
+
+                {/* Success message */}
+                {isSuccess && (
+                  <p className="text-sm text-status-success">
+                    Role requirements generated. You can now complete the survey.
+                  </p>
+                )}
               </div>
-            </div>
-          ) : null}
+            )
+          })() : null}
         </div>
       </SectionCard>
 
@@ -1477,15 +2085,84 @@ export function SiteSurveyWorkspacePage() {
       {canUpdate && data?.survey.status === 'in_progress' ? (
         <SectionCard title="Complete Survey">
           <div className="space-y-4">
-            <p className="text-sm text-app-secondary">
-              Mark this survey as completed to notify Sales that they can proceed with proposal generation.
-            </p>
+            {/* Readiness checklist */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle">
+                Completion Checklist
+              </p>
+              <ul className="space-y-2">
+                {/* Role requirements generated */}
+                <li className="flex items-center gap-2 text-sm">
+                  {hasGeneratedRoleRequirements ? (
+                    <CheckCircle2 className="h-4 w-4 text-status-success" />
+                  ) : roleRequirementsLoading ? (
+                    <Spinner className="h-4 w-4" />
+                  ) : (
+                    <div className="h-4 w-4 rounded-full border-2 border-app-border" />
+                  )}
+                  <span className={hasGeneratedRoleRequirements ? 'text-app-text' : 'text-app-subtle'}>
+                    Role requirements generated ({activeGeneratedRequirements.length})
+                  </span>
+                </li>
+
+                {/* Role requirements up to date */}
+                <li className="flex items-center gap-2 text-sm">
+                  {!roleRequirementsNeedRegeneration ? (
+                    <CheckCircle2 className="h-4 w-4 text-status-success" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 text-status-warning" />
+                  )}
+                  <span className={!roleRequirementsNeedRegeneration ? 'text-app-text' : 'text-status-warning'}>
+                    Role requirements are up to date
+                  </span>
+                </li>
+
+                {/* No blocking errors */}
+                <li className="flex items-center gap-2 text-sm">
+                  {!hasBlockingGenerationErrors ? (
+                    <CheckCircle2 className="h-4 w-4 text-status-success" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 text-status-danger" />
+                  )}
+                  <span className={!hasBlockingGenerationErrors ? 'text-app-text' : 'text-status-danger'}>
+                    No blocking role mapping issues
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Disabled helper messages */}
+            {!canCompleteSurvey && (
+              <div className="rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-status-warning mt-0.5" />
+                  <p className="text-sm text-app-text">
+                    {!hasGeneratedRoleRequirements
+                      ? 'Generate role requirements before marking this survey as completed.'
+                      : roleRequirementsNeedRegeneration
+                      ? 'Deployment data changed. Regenerate role requirements before completion.'
+                      : hasBlockingGenerationErrors
+                      ? 'Resolve role mapping issues and regenerate before completion.'
+                      : 'Survey must be in progress to complete.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Complete button */}
             <Button
               onClick={() => void handleMarkCompleted()}
-              disabled={actionBusy !== null}
+              disabled={actionBusy !== null || !canCompleteSurvey}
             >
               {actionBusy === 'completed' ? 'Completing...' : 'Mark Survey as Completed'}
             </Button>
+
+            {/* Success hint when ready */}
+            {canCompleteSurvey && (
+              <p className="text-xs text-app-subtle">
+                Completing will notify Sales to proceed with proposal generation.
+              </p>
+            )}
           </div>
         </SectionCard>
       ) : null}
@@ -1529,6 +2206,146 @@ export function SiteSurveyWorkspacePage() {
   const survey = data.survey
   const status = survey.status
 
+  // ─── Hero Gate for Pending Surveys ─────────────────────────────────────────────
+  if (status === 'pending') {
+    return (
+      <div className="w-full">
+        {/* Minimal Header */}
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="mb-2 flex items-center gap-1 text-xs text-app-subtle hover:text-app-text transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            {location.pathname.startsWith('/sales/operations-surveys') ? 'Back to queue' : 'Back to lead'}
+          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold text-app-heading">
+              {survey.site_name ?? `Site Survey #${survey.id}`}
+            </h1>
+            <Badge variant={surveyStatusVariant(status)}>{surveyStatusLabel(status)}</Badge>
+          </div>
+          {survey.lead_client_name && (
+            <p className="mt-1 text-sm text-app-secondary">{survey.lead_client_name}</p>
+          )}
+        </div>
+
+        {/* Hero Gate Card */}
+        <div className="mx-auto max-w-2xl">
+          <div className="rounded-2xl border-2 border-brand-200 bg-gradient-to-br from-brand-50 via-white to-brand-50/50 dark:from-brand-900/30 dark:via-app-surface dark:to-brand-900/20 p-8 shadow-lg">
+            {/* Icon */}
+            <div className="flex justify-center mb-6">
+              <div className="relative">
+                <div className="rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 p-5 shadow-lg shadow-brand-500/25">
+                  <ClipboardCheck className="h-10 w-10 text-white" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 rounded-full bg-white dark:bg-app-surface p-1 shadow-md">
+                  <Play className="h-4 w-4 text-brand-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* Title & Description */}
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-bold text-app-heading mb-2">Start Site Survey</h2>
+              <p className="text-app-secondary max-w-md mx-auto">
+                You're about to begin capturing site details for{' '}
+                <span className="font-medium text-app-text">{survey.site_name ?? 'this location'}</span>.
+                All changes will be saved automatically as you progress.
+              </p>
+            </div>
+
+            {/* What you'll capture */}
+            <div className="mb-8">
+              <p className="text-xs font-semibold uppercase tracking-wider text-app-subtle text-center mb-4">
+                6 Sections to Complete
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {[
+                  { icon: FileText, label: 'Scope', desc: 'Site details' },
+                  { icon: Users, label: 'Deployment', desc: 'Manpower' },
+                  { icon: MapPin, label: 'Locations', desc: 'Areas' },
+                  { icon: Wrench, label: 'Equipment', desc: 'Assets' },
+                  { icon: AlertCircle, label: 'Issues', desc: 'Problems' },
+                  { icon: CheckCircle2, label: 'Review', desc: 'Summary' },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center gap-3 rounded-xl bg-white dark:bg-app-surface border border-app-border/50 px-3 py-2.5"
+                  >
+                    <div className="rounded-lg bg-brand-50 dark:bg-brand-900/30 p-2">
+                      <item.icon className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-app-text truncate">{item.label}</p>
+                      <p className="text-xs text-app-subtle">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Assignment Info */}
+            <div className="flex flex-wrap justify-center gap-4 text-xs text-app-subtle mb-8">
+              {survey.assigned_to_name && (
+                <span className="flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" />
+                  Assigned to {survey.assigned_to_name}
+                </span>
+              )}
+              {survey.due_date && (
+                <span className="flex items-center gap-1">
+                  <Settings2 className="h-3.5 w-3.5" />
+                  Due {formatShortDate(survey.due_date)}
+                </span>
+              )}
+            </div>
+
+            {/* CTA Button */}
+            {canUpdate ? (
+              <div className="flex flex-col items-center gap-3">
+                <Button
+                  onClick={() => void handleMarkStarted()}
+                  disabled={actionBusy !== null}
+                  className="min-h-12 px-8 text-base font-semibold gap-2 shadow-lg shadow-brand-500/20"
+                >
+                  {actionBusy === 'started' ? (
+                    <>
+                      <Spinner className="h-5 w-5" />
+                      Starting Survey...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-5 w-5" />
+                      Start Survey Now
+                    </>
+                  )}
+                </Button>
+                {actionError && (
+                  <p className="text-sm text-status-danger">{actionError}</p>
+                )}
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="text-sm text-app-secondary">
+                  Waiting for survey to be started by assigned user.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Helper text */}
+          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-app-subtle">
+            <Info className="h-3.5 w-3.5" />
+            <span>Auto-saves as you go · Progress tracked per section</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Main Survey View (In Progress / Completed) ────────────────────────────────
   return (
     <div className="w-full space-y-4">
       {/* Header */}
@@ -1560,74 +2377,27 @@ export function SiteSurveyWorkspacePage() {
         </div>
       </div>
 
-      {/* Status Action Card */}
-      {status === 'pending' && canUpdate ? (
-        <div className="rounded-panel border border-dashed border-brand-300 bg-brand-50/50 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-brand-900">Start Site Survey</h2>
-              <p className="mt-0.5 text-sm text-brand-700/80">
-                Capture scope, deployment, locations, equipment, and site issues for this location.
-              </p>
+      {/* Workflow Stepper */}
+      {status === 'in_progress' || status === 'completed' ? (
+        <>
+          <WorkflowStepper
+            fillProgress={overallFillProgress}
+            hasGenerated={hasGeneratedRoleRequirements}
+            isStale={roleRequirementsNeedRegeneration}
+            isCompleted={status === 'completed'}
+            canGenerate={canUpdate && status === 'in_progress' && actionBusy === null}
+            canComplete={canUpdate && canCompleteSurvey && actionBusy === null}
+            onGenerateClick={() => void handleGenerateRoles()}
+            onCompleteClick={() => void handleMarkCompleted()}
+            generating={actionBusy === 'generate'}
+            completing={actionBusy === 'completed'}
+          />
+          {actionError && (
+            <div className="rounded-lg border border-status-danger/30 bg-status-danger/5 px-4 py-2">
+              <p className="text-sm text-status-danger">{actionError}</p>
             </div>
-            <Button
-              onClick={() => void handleMarkStarted()}
-              disabled={actionBusy !== null}
-              className="shrink-0 self-start sm:self-auto"
-            >
-              {actionBusy === 'started' ? 'Starting...' : 'Start Survey'}
-            </Button>
-          </div>
-          {actionError ? <p className="mt-2 text-sm text-status-danger">{actionError}</p> : null}
-        </div>
-      ) : status === 'in_progress' ? (
-        <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-app-text">Complete Each Section</h2>
-              <p className="mt-0.5 text-sm text-app-secondary">
-                Use the tabs below to fill in the site survey. Changes save automatically.
-              </p>
-            </div>
-            {canUpdate ? (
-              <div className="flex flex-wrap gap-2 shrink-0">
-                <Button
-                  variant="secondary"
-                  className="min-h-9 px-3 text-sm"
-                  onClick={() => void handleGenerateRoles()}
-                  disabled={actionBusy !== null}
-                >
-                  {actionBusy === 'generate' ? 'Generating...' : 'Generate Requirements'}
-                </Button>
-                <Button
-                  className="min-h-9 px-3 text-sm"
-                  onClick={() => void handleMarkCompleted()}
-                  disabled={actionBusy !== null}
-                >
-                  {actionBusy === 'completed' ? 'Completing...' : 'Mark Completed'}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-          {actionError ? <p className="mt-2 text-sm text-status-danger">{actionError}</p> : null}
-        </div>
-      ) : status === 'completed' ? (
-        <div className="rounded-panel border border-status-success/30 bg-status-success/5 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-2">
-              <CheckCircle2 className="h-5 w-5 text-status-success shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-base font-semibold text-app-text">Survey Completed</h2>
-                <p className="mt-0.5 text-sm text-app-secondary">
-                  This survey has been sent back to Sales for proposal review.
-                </p>
-              </div>
-            </div>
-            <Button variant="secondary" onClick={handleBack} className="shrink-0 self-start sm:self-auto min-h-9 px-3 text-sm">
-              {location.pathname.startsWith('/sales/operations-surveys') ? 'Back to Queue' : 'Back to Lead'}
-            </Button>
-          </div>
-        </div>
+          )}
+        </>
       ) : null}
 
       {/* Tabs */}

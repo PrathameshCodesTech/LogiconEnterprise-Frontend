@@ -5,11 +5,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import type { SiteRoleRequirementRow } from '@/api/siteRoleRequirements'
 import type { BudgetPlanRow } from '@/features/budgets/types'
 import { budgetNatureLabel, formatBudgetAmount } from '@/features/budgets/types'
-import {
-  formatBudgetPlanOptionLabel,
-  loadBillableBudgetOptionsForSite,
-  loadNonBillableBudgetOptionsForDepartments,
-} from '@/features/budgets/budgetLookup'
+import { formatBudgetPlanOptionLabel, loadBillableBudgetOptionsForSite } from '@/features/budgets/budgetLookup'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import {
@@ -181,8 +177,10 @@ export function MRFLineItemForm({
   const [budgetLoading, setBudgetLoading] = useState(false)
   const [budgetLookupError, setBudgetLookupError] = useState<string | null>(null)
 
+  // Budget override lookup - only for billable MRFs
+  // Non-billable MRFs use the MRF-level internal hiring budget (no line-level override)
   useEffect(() => {
-    if (!canReadBudget) {
+    if (!canReadBudget || !isBillable) {
       setBudgetRows([])
       setBudgetLookupError(null)
       setBudgetLoading(false)
@@ -193,57 +191,25 @@ export function MRFLineItemForm({
       setBudgetLoading(true)
       setBudgetLookupError(null)
       setBudgetRows([])
-      const billing = String(parentMrf.billing_type)
-      if (billing === 'billable') {
-        const sid = Number(parentMrf.site)
-        const cid = selectedSite?.client
-        if (!Number.isFinite(sid) || cid == null || !Number.isFinite(cid)) {
-          if (!cancelled) setBudgetLoading(false)
-          return
-        }
-        const res = await loadBillableBudgetOptionsForSite(sid, cid)
-        if (cancelled) return
-        if (res.ok) setBudgetRows(res.items)
-        else {
-          setBudgetRows([])
-          setBudgetLookupError(res.error)
-        }
-        setBudgetLoading(false)
+      const sid = Number(parentMrf.site)
+      const cid = selectedSite?.client
+      if (!Number.isFinite(sid) || cid == null || !Number.isFinite(cid)) {
+        if (!cancelled) setBudgetLoading(false)
         return
       }
-      if (billing === 'non_billable') {
-        const ids: number[] = []
-        const req = Number(parentMrf.requesting_department)
-        const reqd = Number(parentMrf.required_department)
-        if (Number.isFinite(req) && req > 0) ids.push(req)
-        if (Number.isFinite(reqd) && reqd > 0) ids.push(reqd)
-        const res = await loadNonBillableBudgetOptionsForDepartments(ids)
-        if (cancelled) return
-        if (res.ok) {
-          const allowed = new Set(ids)
-          setBudgetRows(
-            res.items.filter((b) => b.department == null || allowed.has(Number(b.department))),
-          )
-        } else {
-          setBudgetRows([])
-          setBudgetLookupError(res.error)
-        }
-        setBudgetLoading(false)
-        return
+      const res = await loadBillableBudgetOptionsForSite(sid, cid)
+      if (cancelled) return
+      if (res.ok) setBudgetRows(res.items)
+      else {
+        setBudgetRows([])
+        setBudgetLookupError(res.error)
       }
-      if (!cancelled) setBudgetLoading(false)
+      setBudgetLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [
-    canReadBudget,
-    parentMrf.billing_type,
-    parentMrf.site,
-    parentMrf.requesting_department,
-    parentMrf.required_department,
-    selectedSite?.client,
-  ])
+  }, [canReadBudget, isBillable, parentMrf.site, selectedSite?.client])
 
   const headcountNum = Number(values.headcount)
   const approvedHeadcount = selectedSrr?.approved_headcount ?? initial?.srr_approved_headcount ?? null
@@ -656,24 +622,32 @@ export function MRFLineItemForm({
       </div>
 
       {!isBillable ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            id="mrf_li_budget_min"
-            label="Budget min"
-            value={values.budget_min}
-            onChange={(e) => setValues((v) => ({ ...v, budget_min: e.target.value }))}
-            disabled={submitting}
-            inputMode="decimal"
-            error={budgetRangeError ?? undefined}
-          />
-          <Input
-            id="mrf_li_budget_max"
-            label="Budget max"
-            value={values.budget_max}
-            onChange={(e) => setValues((v) => ({ ...v, budget_max: e.target.value }))}
-            disabled={submitting}
-            inputMode="decimal"
-          />
+        <div className="space-y-3">
+          <div className="rounded-panel border border-app-border bg-app-muted/20 p-3">
+            <p className="text-xs font-semibold text-app-text">Internal hiring line item</p>
+            <p className="mt-1 text-xs text-app-secondary">
+              No site role requirement needed. Enter the monthly cost directly.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              id="mrf_li_budget_min"
+              label="Monthly cost (min)"
+              value={values.budget_min}
+              onChange={(e) => setValues((v) => ({ ...v, budget_min: e.target.value }))}
+              disabled={submitting}
+              inputMode="decimal"
+              error={budgetRangeError ?? undefined}
+            />
+            <Input
+              id="mrf_li_budget_max"
+              label="Monthly cost (max)"
+              value={values.budget_max}
+              onChange={(e) => setValues((v) => ({ ...v, budget_max: e.target.value }))}
+              disabled={submitting}
+              inputMode="decimal"
+            />
+          </div>
         </div>
       ) : null}
 
@@ -699,7 +673,8 @@ export function MRFLineItemForm({
         </div>
       ) : null}
 
-      {canReadBudget ? (
+      {/* Budget override - only for billable MRFs */}
+      {canReadBudget && isBillable ? (
         <>
           {budgetLookupError ? (
             <ErrorState
@@ -714,10 +689,10 @@ export function MRFLineItemForm({
             disabled={budgetSelectDisabled}
           >
             <option value="">
-              {billable && (!Number.isFinite(Number(parentMrf.site)) || selectedSite?.client == null)
+              {!Number.isFinite(Number(parentMrf.site)) || selectedSite?.client == null
                 ? 'Site/client unavailable for budget lookup'
                 : budgetLoading
-                  ? 'Loading budgets…'
+                  ? 'Loading budgets...'
                   : 'No override (inherit from MRF if set)'}
             </option>
             {budgetRows.map((b) => (
@@ -730,6 +705,17 @@ export function MRFLineItemForm({
             <p className="text-xs text-app-subtle">If left blank, this line item will use the MRF budget.</p>
           ) : null}
         </>
+      ) : null}
+
+      {/* Non-billable MRFs use MRF-level internal hiring budget - no line override */}
+      {!isBillable && mrfHasBudget ? (
+        <div className="rounded-panel border border-app-border bg-app-muted/20 p-3 text-sm">
+          <p className="text-xs font-semibold text-app-text">Budget</p>
+          <p className="mt-1 text-xs text-app-secondary">
+            This line item uses the MRF's internal hiring budget. Line-level budget overrides are not available for
+            non-billable MRFs.
+          </p>
+        </div>
       ) : null}
 
       <button type="submit" hidden />

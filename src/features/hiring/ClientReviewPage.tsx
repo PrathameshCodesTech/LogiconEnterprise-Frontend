@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
+import { applicationIsInternalNonBillable } from '@/features/hiring/hiringLaneLabels'
 import type { ClientReviewApplicationRow } from '@/features/hiring/types'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -230,8 +231,10 @@ export function ClientReviewPage() {
         only_pending: onlyPending || undefined,
         client_decision: decisionFilter || undefined,
       })
-      setRows(res.items)
-      setCount(res.count)
+      // Defensive filter: backend is source of truth, but exclude internal non-billable as fallback
+      const filteredItems = res.items.filter((app) => !applicationIsInternalNonBillable(app))
+      setRows(filteredItems)
+      setCount(filteredItems.length)
     } catch (e: unknown) {
       setError(parseApiError(e, 'Could not load candidate review queue').message)
     } finally {
@@ -281,7 +284,7 @@ export function ClientReviewPage() {
             placeholder="Search candidate name or phone…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full rounded border border-app-border bg-app-muted pl-7 pr-2 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="h-8 w-full rounded border border-app-border bg-app-surface pl-7 pr-2 text-xs text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           />
         </div>
         <select

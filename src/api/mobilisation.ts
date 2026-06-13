@@ -6,6 +6,7 @@
  */
 import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
+import type { AccessRole } from '@/api/access'
 import type {
   AssignOperationsOwnerPayload,
   ApplyMobilisationSetupSuggestionsResult,
@@ -167,4 +168,17 @@ export async function applyMobilisationSetupBuilderTemplate(
 ): Promise<MobilisationSetupBuilder> {
   const res = await api.post(`/api/mobilisation/setup-requests/${id}/setup-builder/apply-template/`, { setup_strategy })
   return res.data as MobilisationSetupBuilder
+}
+
+// Eligible client roles
+
+export async function getMobilisationEligibleClientRoles(
+  requestId: number,
+  scopeLevel: 'client' | 'site',
+): Promise<{ items: AccessRole[]; count?: number }> {
+  const { data } = await api.get<AccessRole[]>(
+    `/api/mobilisation/setup-requests/${requestId}/eligible-client-roles/`,
+    { params: { scope_level: scopeLevel } },
+  )
+  return { items: data, count: data.length }
 }

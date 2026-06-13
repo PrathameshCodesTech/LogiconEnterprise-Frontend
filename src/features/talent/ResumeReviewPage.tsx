@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   CheckCircle2,
@@ -30,7 +31,8 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 
 import { Spinner } from '@/components/ui/Spinner'
-import { resumeStatusLabel } from '@/features/talent/talentLabels'
+import { DuplicateCandidatesPanel } from '@/features/talent/DuplicateCandidatesPanel'
+import { DOCUMENT_TYPE_FILTER_OPTIONS, documentTypeLabel, resumeStatusLabel } from '@/features/talent/talentLabels'
 import type {
   ApplyReviewCandidateInput,
   ApplyReviewEducationInput,
@@ -80,7 +82,9 @@ function fmtBytes(n: number | null | undefined): string {
 
 interface QueueFilters {
   status: string
+  document_type: string
   source_type: string
+  uploaded_by: string
   candidate: string
   confidence_below: string
   uploaded_from: string
@@ -89,7 +93,9 @@ interface QueueFilters {
 
 const BLANK_FILTERS: QueueFilters = {
   status: '',
+  document_type: '',
   source_type: '',
+  uploaded_by: '',
   candidate: '',
   confidence_below: '',
   uploaded_from: '',
@@ -168,6 +174,10 @@ function QueueRow({
           <span className="shrink-0">conf {fmtConfidence(ps.confidence)}</span>
         )}
         {item.uploaded_at && <span className="shrink-0">{fmtDate(item.uploaded_at)}</span>}
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-app-subtle">
+        {item.document_type ? <span>{documentTypeLabel(item.document_type)}</span> : null}
+        {item.uploaded_by != null ? <span>User #{item.uploaded_by}</span> : null}
       </div>
       {reason && (
         <p className="mt-0.5 text-[11px] text-status-danger line-clamp-2">{reason}</p>
@@ -947,6 +957,12 @@ function DuplicateTab({ detail, onResolved }: { detail: ResumeReviewDetail; onRe
           {busy ? 'Resolving…' : 'Resolve duplicate'}
         </Button>
       </form>
+
+      {detail.candidate ? (
+        <div className="border-t border-app-border pt-4">
+          <DuplicateCandidatesPanel candidate={detail.candidate} onMerged={onResolved} />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1065,11 +1081,15 @@ function DetailPane({
 
 // Main page
 
-export function ResumeReviewPage() {
+export function ResumeReviewQueuePage() {
+  const [searchParams] = useSearchParams()
+  const resumeFromUrl = Number(searchParams.get('resume'))
   const [items, setItems] = useState<ResumeReviewQueueItem[]>([])
   const [queueLoading, setQueueLoading] = useState(true)
   const [queueError, setQueueError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(
+    Number.isFinite(resumeFromUrl) && resumeFromUrl > 0 ? resumeFromUrl : null,
+  )
 
   const [filters, setFilters] = useState<QueueFilters>(BLANK_FILTERS)
   const [candidateInput, setCandidateInput] = useState('')
@@ -1083,7 +1103,9 @@ export function ResumeReviewPage() {
       try {
         const params = {
           status: f.status || undefined,
+          document_type: f.document_type || undefined,
           source_type: f.source_type || undefined,
+          uploaded_by: f.uploaded_by.trim() || undefined,
           candidate: f.candidate || undefined,
           confidence_below: f.confidence_below || undefined,
           uploaded_from: f.uploaded_from || undefined,
@@ -1121,12 +1143,19 @@ export function ResumeReviewPage() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div>
+        <h1 className="text-xl font-bold text-app-heading">Resume review queue</h1>
+        <p className="mt-1 text-sm text-app-secondary">
+          Review failed or low-confidence resumes, correct parsed data, and mark as ready.
+        </p>
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-app-border bg-app-surface shadow-sm">
       {/* Left pane - queue */}
-      <div className="flex flex-col w-80 shrink-0 border-r border-app-border bg-app-surface h-full overflow-hidden">
-        <div className="px-3 py-2 border-b border-app-border bg-app-surface shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-app-text">Review queue</h2>
+      <div className="flex h-full w-80 shrink-0 flex-col overflow-hidden border-r border-app-border">
+        <div className="shrink-0 border-b border-app-border px-3 py-2">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-app-heading">Queue</h2>
             <button
               type="button"
               onClick={refreshQueue}
@@ -1152,12 +1181,31 @@ export function ResumeReviewPage() {
               {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             <select
+              value={filters.document_type}
+              onChange={(e) => setFilter('document_type', e.target.value)}
+              className="h-7 w-full rounded-lg border border-app-border bg-app-muted/50 px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
+            >
+              {DOCUMENT_TYPE_FILTER_OPTIONS.map((o) => (
+                <option key={o.value || 'all'} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <select
               value={filters.source_type}
               onChange={(e) => setFilter('source_type', e.target.value)}
-              className="h-7 w-full rounded border border-app-border bg-app-surface px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="h-7 w-full rounded-lg border border-app-border bg-app-muted/50 px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               {SOURCE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+            <input
+              type="number"
+              min={1}
+              placeholder="Uploaded by user ID"
+              value={filters.uploaded_by}
+              onChange={(e) => setFilter('uploaded_by', e.target.value)}
+              className="h-7 w-full rounded-lg border border-app-border bg-app-muted/50 px-2 text-xs text-app-text placeholder:text-app-subtle focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
             <div className="flex gap-1.5 items-center">
               <input
                 type="number"
@@ -1228,6 +1276,10 @@ export function ResumeReviewPage() {
           />
         )}
       </div>
+      </div>
     </div>
   )
 }
+
+/** @deprecated Use ResumeReviewQueuePage — kept for legacy imports */
+export const ResumeReviewPage = ResumeReviewQueuePage

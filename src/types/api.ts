@@ -3,6 +3,17 @@
   refresh: string
 }
 
+export type PortalMode = 'internal' | 'client'
+
+export type NavPersona =
+  | 'admin'
+  | 'sales'
+  | 'operations'
+  | 'finance'
+  | 'hr'
+  | 'client'
+  | 'mixed'
+
 export interface DrfPaginated<T> {
   count: number
   next: string | null
@@ -52,6 +63,14 @@ export interface MeResponse {
   user_type: string
   org: number | null
   is_superuser: boolean
+  /** Backend-driven: true if user should see client portal */
+  is_client_facing: boolean
+  /** Backend-driven: 'internal' or 'client' portal mode */
+  portal_mode: PortalMode
+  /** Backend-driven: primary role codes for display/debug */
+  primary_role_codes: string[]
+  /** Backend-driven: persona for nav grouping */
+  nav_persona: NavPersona
 }
 
 

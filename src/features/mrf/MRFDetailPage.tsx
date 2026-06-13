@@ -709,7 +709,13 @@ export function MRFDetailPage() {
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Billing type</dt>
-              <dd className="font-medium text-app-text">{row.billing_type}</dd>
+              <dd>
+                {row.billing_type === 'non_billable' ? (
+                  <Badge variant="warning">Internal Non-Billable</Badge>
+                ) : (
+                  <Badge variant="info">Client Billable</Badge>
+                )}
+              </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Requesting department</dt>

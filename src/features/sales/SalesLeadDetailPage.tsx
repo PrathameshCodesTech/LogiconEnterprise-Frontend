@@ -10,6 +10,7 @@ import {
   deleteSalesRoleRequirement,
   generateProposalForLead,
   getSalesLead,
+  listEligibleOperationsOwnersForLead,
   listProposalVersions,
   listSalesActivities,
   listSalesDocuments,
@@ -23,7 +24,7 @@ import {
   uploadSalesDocument,
 } from '@/api/sales'
 import { listLocationAreas, type LocationAreaRow } from '@/api/wages'
-import { listUsers, type UserRow } from '@/api/users'
+import type { UserRow } from '@/api/users'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
@@ -421,9 +422,11 @@ function OverviewTab({ lead }: { lead: SalesLead }) {
 function SitesTab({
   leadId,
   canEdit,
+  onSitesChanged,
 }: {
   leadId: number
   canEdit: boolean
+  onSitesChanged?: (sites: SalesLeadSite[]) => void
 }) {
   const [sites, setSites] = useState<SalesLeadSite[]>([])
   const [loading, setLoading] = useState(true)
@@ -431,14 +434,16 @@ function SitesTab({
   const [siteDrawerOpen, setSiteDrawerOpen] = useState(false)
   const [editingSite, setEditingSite] = useState<SalesLeadSite | null>(null)
 
-  async function load() {
+  async function load(): Promise<SalesLeadSite[]> {
     setLoading(true)
     setError(null)
     try {
       const res = await listSalesLeadSites({ lead: leadId })
       setSites(res.items)
+      return res.items
     } catch (e: unknown) {
       setError(parseApiError(e, 'Failed to load sites').message)
+      return []
     } finally {
       setLoading(false)
     }
@@ -530,7 +535,12 @@ function SitesTab({
         leadId={leadId}
         initialSite={editingSite}
         onClose={() => setSiteDrawerOpen(false)}
-        onSaved={() => void load()}
+        onSaved={() => {
+          void (async () => {
+            const nextSites = await load()
+            onSitesChanged?.(nextSites)
+          })()
+        }}
       />
     </div>
   )
@@ -1536,6 +1546,7 @@ export function SalesLeadDetailPage() {
   const [operationsOwner, setOperationsOwner] = useState('')
   const [operationsUsers, setOperationsUsers] = useState<UserRow[]>([])
   const [operationsUsersLoading, setOperationsUsersLoading] = useState(false)
+  const [operationsUsersError, setOperationsUsersError] = useState<string | null>(null)
   const [pageSurveys, setPageSurveys] = useState<SiteSurvey[]>([])
   const [activeSitesCount, setActiveSitesCount] = useState<number | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState(false)
@@ -1568,14 +1579,17 @@ export function SalesLeadDetailPage() {
   useEffect(() => {
     if (!canEdit) return
     setOperationsUsersLoading(true)
-    listUsers({ user_type: 'internal', is_active: true, page: 1 })
+    setOperationsUsersError(null)
+    listEligibleOperationsOwnersForLead(leadId)
       .then((res) => {
-        const ops = res.items.filter((u) => u.department_code === 'operations')
-        setOperationsUsers(ops.length > 0 ? ops : res.items)
+        setOperationsUsers(res.items)
       })
-      .catch(() => setOperationsUsers([]))
+      .catch((e: unknown) => {
+        setOperationsUsers([])
+        setOperationsUsersError(parseApiError(e, 'Could not load operations users').message)
+      })
       .finally(() => setOperationsUsersLoading(false))
-  }, [canEdit])
+  }, [canEdit, leadId])
 
   async function handleSubmitToOperations() {
     setActionBusy('submit')
@@ -1665,15 +1679,25 @@ export function SalesLeadDetailPage() {
             </div>
           </div>
         </div>
-        {canEdit ? (
-          <Button
-            variant="secondary"
-            className="shrink-0 self-start"
-            onClick={() => setEditDrawerOpen(true)}
-          >
-            Edit lead
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2 shrink-0 self-start">
+          {canEdit && lead.current_stage === 'site_survey_completed' ? (
+            <Button
+              variant="primary"
+              disabled={actionBusy !== null}
+              onClick={() => void handleGenerateProposal()}
+            >
+              {actionBusy === 'generate' ? 'Generating…' : 'Generate Proposal'}
+            </Button>
+          ) : null}
+          {canEdit ? (
+            <Button
+              variant="secondary"
+              onClick={() => setEditDrawerOpen(true)}
+            >
+              Edit lead
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* Stage stepper */}
@@ -1734,6 +1758,14 @@ export function SalesLeadDetailPage() {
                   {actionBusy === 'submit' ? 'Submitting…' : 'Submit to operations'}
                 </Button>
               </div>
+              {operationsUsersError ? (
+                <p className="mt-2 text-sm text-status-danger">{operationsUsersError}</p>
+              ) : null}
+              {!operationsUsersLoading && !operationsUsersError && operationsUsers.length === 0 ? (
+                <p className="mt-2 text-sm text-status-warning">
+                  No active internal users are available to assign as operations owner.
+                </p>
+              ) : null}
               {actionError ? <p className="mt-2 text-sm text-status-danger">{actionError}</p> : null}
             </div>
           )
@@ -1772,60 +1804,30 @@ export function SalesLeadDetailPage() {
           )
         }
         if (stage === 'site_survey_completed') {
-          return (
-            <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-              <p className="mb-1 text-sm font-medium text-app-text">Survey completed — ready for review</p>
-              <p className="mt-1 mb-3 text-xs text-app-secondary">
-                Review role requirements from the completed survey, then generate a proposal.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" className="min-h-8 px-3 text-xs" onClick={() => setTab('surveys')}>
-                  Open surveys
-                </Button>
-                <Button variant="secondary" className="min-h-8 px-3 text-xs" onClick={() => setTab('role-requirements')}>
-                  Review role requirements
-                </Button>
-                {canEdit ? (
-                  <Button
-                    variant="secondary"
-                    disabled={actionBusy !== null}
-                    onClick={() => void handleGenerateProposal()}
+          // Keep only warnings if any - actions moved to header
+          if (missingRuleCodes && missingRuleCodes.length > 0) {
+            return (
+              <div className="flex items-start gap-2 rounded-lg border border-status-warning/30 bg-status-warning/5 p-3">
+                <AlertTriangle className="h-4 w-4 text-status-warning mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-app-text">Missing component rules</p>
+                  <p className="text-xs text-app-secondary mt-0.5">
+                    Configure before generating: {missingRuleCodes.join(', ')}
+                  </p>
+                  <Link
+                    to="/sales/component-rules"
+                    className="inline-flex items-center gap-1 mt-2 text-xs text-status-warning hover:underline"
                   >
-                    {actionBusy === 'generate' ? 'Generating…' : 'Generate proposal'}
-                  </Button>
-                ) : null}
-              </div>
-              {missingRuleCodes && missingRuleCodes.length > 0 ? (
-                <div className="mt-4 rounded-panel border border-status-warning/40 bg-status-warning/8 p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-status-warning">
-                        Proposal component rules are not fully configured
-                      </p>
-                      <p className="mt-1 text-xs text-app-secondary">
-                        Finance/admin must configure all salary and statutory components before proposals can be generated.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {missingRuleCodes.map((code) => (
-                          <Badge key={code} variant="danger">{code}</Badge>
-                        ))}
-                      </div>
-                      <Link
-                        to="/sales/component-rules"
-                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-status-warning/20 px-3 py-1.5 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/30"
-                      >
-                        Open Component Rules
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
-                  </div>
+                    Open Component Rules <ExternalLink className="h-3 w-3" />
+                  </Link>
                 </div>
-              ) : actionError ? (
-                <p className="mt-2 text-sm text-status-danger">{actionError}</p>
-              ) : null}
-            </div>
-          )
+              </div>
+            )
+          }
+          if (actionError) {
+            return <p className="text-sm text-status-danger">{actionError}</p>
+          }
+          return null
         }
         if (['budget_generated', 'sales_review'].includes(stage) && canEdit) {
           return (
@@ -1905,7 +1907,15 @@ export function SalesLeadDetailPage() {
       {/* Tab content */}
       <div className="min-h-[200px]">
         {tab === 'overview' && <OverviewTab lead={lead} />}
-        {tab === 'sites' && <SitesTab leadId={leadId} canEdit={canEdit} />}
+        {tab === 'sites' && (
+          <SitesTab
+            leadId={leadId}
+            canEdit={canEdit}
+            onSitesChanged={(nextSites) => {
+              setActiveSitesCount(nextSites.filter((s) => s.is_active !== false).length)
+            }}
+          />
+        )}
         {tab === 'surveys' && <SurveysTab leadId={leadId} canEdit={canEdit} />}
         {tab === 'role-requirements' && <RoleRequirementsTab leadId={leadId} canEdit={canEdit} />}
         {tab === 'proposals' && <ProposalsTab leadId={leadId} />}

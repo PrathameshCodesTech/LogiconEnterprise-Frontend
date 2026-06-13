@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ChevronDown, ChevronRight, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Input } from '@/components/ui/Input'
@@ -16,6 +17,7 @@ export function TemplateBasicsPanel({
   canEdit: boolean
   onSaved: (next: FormTemplateRow) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [values, setValues] = useState({
     name: template.name,
     code: template.code,
@@ -69,65 +71,77 @@ export function TemplateBasicsPanel({
   }
 
   return (
-    <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-app-text">Template basics</p>
-        {success ? <span className="text-xs text-status-success">{success}</span> : null}
-      </div>
-
-      <form onSubmit={handleSubmit} className="mt-3 space-y-4">
-        {error ? <ErrorState message={error} /> : null}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            id="tpl_name"
-            label="Name"
-            value={values.name}
-            onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
-            error={nameError ?? undefined}
-            disabled={!canEdit || submitting}
-            required
-          />
-          <Input
-            id="tpl_code"
-            label="Code"
-            value={values.code}
-            onChange={(e) => setValues((v) => ({ ...v, code: e.target.value }))}
-            error={codeError ?? undefined}
-            disabled={!canEdit || submitting}
-            required
-          />
+    <div className="rounded-lg border border-app-border bg-app-surface shadow-sm">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-app-muted/50"
+      >
+        <div className="flex items-center gap-2">
+          <Settings className="h-4 w-4 text-app-subtle" aria-hidden />
+          <span className="text-sm font-medium text-app-text">Edit template settings</span>
+          {success ? <span className="text-xs text-status-success">{success}</span> : null}
         </div>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-app-subtle" aria-hidden />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-app-subtle" aria-hidden />
+        )}
+      </button>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="tpl_description" className="text-sm font-medium text-app-secondary">
-            Description
-          </label>
-          <textarea
-            id="tpl_description"
-            value={values.description}
-            onChange={(e) => setValues((v) => ({ ...v, description: e.target.value }))}
-            disabled={!canEdit || submitting}
-            className="min-h-20 w-full rounded-panel border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-          />
-        </div>
+      {expanded ? (
+        <form onSubmit={handleSubmit} className="border-t border-app-border px-4 py-3">
+          {error ? <ErrorState message={error} /> : null}
 
-        <label className="flex items-center gap-2 text-sm text-app-secondary">
-          <input
-            type="checkbox"
-            checked={values.is_active}
-            onChange={(e) => setValues((v) => ({ ...v, is_active: e.target.checked }))}
-            disabled={!canEdit || submitting}
-          />
-          Active
-        </label>
-
-        <div className="flex justify-end">
-          <Button type="submit" disabled={!canSubmit}>
-            {submitting ? 'Saving...' : 'Save basics'}
-          </Button>
-        </div>
-      </form>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="sm:col-span-1">
+              <Input
+                id="tpl_name"
+                label="Name"
+                value={values.name}
+                onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
+                error={nameError ?? undefined}
+                disabled={!canEdit || submitting}
+                required
+              />
+            </div>
+            <div className="sm:col-span-1">
+              <Input
+                id="tpl_code"
+                label="Code"
+                value={values.code}
+                onChange={(e) => setValues((v) => ({ ...v, code: e.target.value }))}
+                error={codeError ?? undefined}
+                disabled={!canEdit || submitting}
+                required
+              />
+            </div>
+            <div className="sm:col-span-1">
+              <Input
+                id="tpl_description"
+                label="Description"
+                value={values.description}
+                onChange={(e) => setValues((v) => ({ ...v, description: e.target.value }))}
+                disabled={!canEdit || submitting}
+              />
+            </div>
+            <div className="flex items-end gap-3 sm:col-span-1">
+              <label className="flex items-center gap-2 pb-2 text-sm text-app-secondary">
+                <input
+                  type="checkbox"
+                  checked={values.is_active}
+                  onChange={(e) => setValues((v) => ({ ...v, is_active: e.target.checked }))}
+                  disabled={!canEdit || submitting}
+                />
+                Active
+              </label>
+              <Button type="submit" disabled={!canSubmit} className="ml-auto">
+                {submitting ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      ) : null}
     </div>
   )
 }

@@ -16,6 +16,12 @@ import {
   resolveMasterCommercials,
 } from '@/features/mrf/mrfCommercialOverride'
 import { proposalStatusLabel, proposalStatusVariant } from '@/features/sales/salesUtils'
+import {
+  buildBreakupRoleGroups,
+  getBreakupComponentStyle,
+  getBreakupRoleBandStyle,
+  getUnmappedBreakupLines,
+} from '@/features/sales/salesBreakupGrouping'
 import type {
   WorkflowAction,
   WorkflowMyTask,
@@ -28,6 +34,7 @@ import type {
   WorkflowTaskSalesProposalBreakupLine,
   WorkflowTaskTarget,
 } from '@/features/workflow/types'
+import type { ProposalBreakupLine, ProposalBudgetLine } from '@/types/sales'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
@@ -103,9 +110,7 @@ function salesProposalDrawerView(
     valid_to: proposal.internally_approved_at ?? null,
     budget_lines: target.budget_lines.map((line) => ({
       ...line,
-      job_role_name: line.description ?? null,
-      site_name: line.service_category ?? null,
-      is_manual_override: false,
+      is_manual_override: line.is_manual_override ?? false,
     })),
     breakup_lines: target.breakup_lines,
   }
@@ -802,49 +807,141 @@ function BudgetLinesTabProposal({ proposal }: { proposal: WorkflowTaskSalesPropo
 // ─── Sales proposal breakup tab ───────────────────────────────────────────────
 
 function BreakupTabProposal({ proposal }: { proposal: WorkflowTaskSalesProposal }) {
-  const lines: WorkflowTaskSalesProposalBreakupLine[] = (proposal.breakup_lines ?? []).slice().sort(
-    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
-  )
-  if (lines.length === 0) {
+  const budgetLines: ProposalBudgetLine[] = (proposal.budget_lines ?? []).map((line) => ({
+    id: line.id,
+    proposal_version: proposal.id,
+    site: line.site ?? line.site_id ?? null,
+    site_name: line.site_name ?? null,
+    role_requirement: line.role_requirement ?? null,
+    service_category: line.service_category ?? '',
+    job_role: line.job_role ?? line.job_role_id ?? null,
+    job_role_name: line.job_role_name ?? null,
+    description: line.description ?? '',
+    manpower_count: line.manpower_count ?? null,
+    unit_cost: line.unit_cost ?? null,
+    total_cost: line.total_cost ?? null,
+    sort_order: line.sort_order ?? 0,
+    is_manual_override: line.is_manual_override ?? false,
+  }))
+  const breakupLines: ProposalBreakupLine[] = (proposal.breakup_lines ?? []).map((line) => ({
+    id: line.id,
+    proposal_version: proposal.id,
+    site: line.site ?? line.site_id ?? null,
+    site_name: line.site_name ?? null,
+    role_requirement: line.role_requirement ?? null,
+    job_role: line.job_role ?? line.job_role_id ?? null,
+    job_role_name: line.job_role_name ?? null,
+    component_name: line.component_name ?? '',
+    component_type: line.component_type ?? '',
+    percentage: line.percentage ?? null,
+    amount: line.amount ?? null,
+    sort_order: line.sort_order ?? 0,
+  }))
+  const groups = buildBreakupRoleGroups(breakupLines, budgetLines)
+  const unmappedBreakupLines = getUnmappedBreakupLines(breakupLines)
+
+  if (breakupLines.length === 0) {
     return <p className="text-sm text-app-secondary">No breakup lines.</p>
   }
+  if (unmappedBreakupLines.length > 0) {
+    return (
+      <div className="rounded-panel border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+        <p className="font-semibold">Salary breakup is missing role mapping.</p>
+        <p className="mt-1">
+          {unmappedBreakupLines.length} component
+          {unmappedBreakupLines.length !== 1 ? 's are' : ' is'} not linked to a role requirement.
+          Send this proposal back for regeneration before approving.
+        </p>
+      </div>
+    )
+  }
   return (
-    <div className="overflow-x-auto rounded-panel border border-app-border">
-      <Table>
-        <THead>
-          <TR>
-            <TH className="py-2">Code</TH>
-            <TH className="py-2">Component</TH>
-            <TH className="py-2">Type</TH>
-            <TH className="py-2">Percentage</TH>
-            <TH className="py-2">Amount</TH>
-          </TR>
-        </THead>
-        <TBody>
-          {lines.map((bl) => (
-            <TR key={bl.id}>
-              <TD className="py-2">
-                <span className="font-mono text-xs text-app-text">{bl.component_code ?? '—'}</span>
-              </TD>
-              <TD className="py-2 text-sm">{bl.component_name ?? '—'}</TD>
-              <TD className="py-2 text-xs capitalize text-app-secondary">
-                {bl.component_type?.replace(/_/g, ' ') ?? '—'}
-              </TD>
-              <TD className="py-2 text-xs tabular-nums text-app-secondary">
-                {bl.percentage ? `${bl.percentage}%` : '—'}
-              </TD>
-              <TD className="py-2 text-sm font-semibold tabular-nums">
-                {bl.amount ? formatMoney(bl.amount) : '—'}
-              </TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
+    <div className="space-y-4">
+      <div className="rounded-panel border border-app-border bg-app-muted/20 px-3 py-2">
+        <p className="text-xs font-medium text-app-secondary">
+          {groups.length} role{groups.length !== 1 ? 's' : ''} - {breakupLines.length} component
+          {breakupLines.length !== 1 ? 's' : ''}
+        </p>
+      </div>
+
+      {groups.map((group, groupIndex) => {
+        const band = getBreakupRoleBandStyle(groupIndex, group.groupKey)
+        return (
+          <section
+            key={group.groupKey}
+            className={cn(
+              'overflow-hidden rounded-panel border border-l-4 shadow-sm',
+              band.border,
+              band.borderAccent,
+            )}
+          >
+            <div className={cn('border-b px-4 py-3', band.headerBg, band.headerBorder)}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className={cn('text-sm font-semibold', band.titleText)}>{group.title}</p>
+                  <div className={cn('mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs', band.metaText)}>
+                    {group.siteName ? <span>{group.siteName}</span> : null}
+                    {group.headcount != null ? <span>Headcount {group.headcount}</span> : null}
+                    {group.unitCost ? <span>Unit {formatMoney(group.unitCost)}</span> : null}
+                    {group.totalCost ? <span>Budget {formatMoney(group.totalCost)}</span> : null}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">
+                    Role total
+                  </p>
+                  <p className={cn('text-sm font-bold tabular-nums', band.totalText)}>
+                    {formatMoney(group.total)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className={cn('space-y-3 p-3', band.bodyBg)}>
+              {group.sections.map((section) => {
+                const sectionStyle = getBreakupComponentStyle(section.componentType)
+                return (
+                  <div key={`${group.groupKey}-${section.componentType}`} className="overflow-hidden rounded-panel border border-app-border bg-app-surface">
+                    <div className={cn('flex items-center justify-between border-b px-3 py-2', sectionStyle.border)}>
+                      <p className={cn('text-xs font-semibold', sectionStyle.text)}>{section.label}</p>
+                      <p className="text-xs font-semibold tabular-nums text-app-text">
+                        {formatMoney(section.total)}
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <THead>
+                          <TR>
+                            <TH className="py-2">Component</TH>
+                            <TH className="py-2">Percentage</TH>
+                            <TH className="py-2">Amount</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {section.rows.map((line) => (
+                            <TR key={line.id}>
+                              <TD className="py-2 text-sm">{line.component_name ?? '-'}</TD>
+                              <TD className="py-2 text-xs tabular-nums text-app-secondary">
+                                {line.percentage ? `${line.percentage}%` : '-'}
+                              </TD>
+                              <TD className="py-2 text-sm font-semibold tabular-nums">
+                                {line.amount ? formatMoney(line.amount) : '-'}
+                              </TD>
+                            </TR>
+                          ))}
+                        </TBody>
+                      </Table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
-
-// ─── Timeline tab ─────────────────────────────────────────────────────────────
 
 function TimelineTab({
   steps,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { loadAllSites } from '@/features/budgets/loadPagedLookups'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Input } from '@/components/ui/Input'
@@ -23,6 +24,8 @@ export interface BudgetPlanFormProps {
   serverError: string | null
   serverFields?: Record<string, string>
   initial: BudgetPlanRow | null
+  /** When 'internal_hiring', forces budget_nature=non_billable, budget_type=hiring, hides client/site */
+  presetMode?: 'internal_hiring' | null
   clients: ClientRow[]
   clientsLoading: boolean
   clientsError: string | null
@@ -78,6 +81,7 @@ export function BudgetPlanForm({
   serverError,
   serverFields,
   initial,
+  presetMode,
   clients,
   clientsLoading,
   clientsError,
@@ -86,6 +90,7 @@ export function BudgetPlanForm({
   departmentsError,
   onSubmit,
 }: BudgetPlanFormProps) {
+  const isInternalHiringMode = presetMode === 'internal_hiring'
   const [values, setValues] = useState<Record<string, string>>(() =>
     initial ? rowToForm(initial) : emptyDefaults(),
   )
@@ -98,6 +103,18 @@ export function BudgetPlanForm({
     setValues(initial ? rowToForm(initial) : emptyDefaults())
     setLocalErrors({})
   }, [initial, mode])
+
+  // Force internal hiring preset values
+  useEffect(() => {
+    if (!isInternalHiringMode) return
+    setValues((prev) => ({
+      ...prev,
+      budget_nature: 'non_billable',
+      budget_type: 'hiring',
+      client: '',
+      site: '',
+    }))
+  }, [isInternalHiringMode])
 
   const budgetNature = values.budget_nature as BudgetNature
   const clientIdNum = values.client ? Number(values.client) : NaN
@@ -272,35 +289,47 @@ export function BudgetPlanForm({
         error={mergeErr('code')}
       />
 
-      <Select
-        id={`${formId}-budget_nature`}
-        label="Budget nature"
-        value={values.budget_nature}
-        onChange={(e) => onNatureChange(e.target.value)}
-        disabled={submitting}
-      >
-        {BUDGET_NATURE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
+      {isInternalHiringMode ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-panel border border-app-border bg-app-muted/40 p-3">
+          <span className="text-sm font-medium text-app-secondary">Budget type:</span>
+          <Badge variant="warning">Internal</Badge>
+          <Badge variant="info">Hiring</Badge>
+          <span className="text-xs text-app-subtle">(preset - cannot change)</span>
+        </div>
+      ) : (
+        <>
+          <Select
+            id={`${formId}-budget_nature`}
+            label="Budget nature"
+            value={values.budget_nature}
+            onChange={(e) => onNatureChange(e.target.value)}
+            disabled={submitting}
+          >
+            {BUDGET_NATURE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
 
-      <Select
-        id={`${formId}-budget_type`}
-        label="Budget type"
-        value={values.budget_type}
-        onChange={(e) => setField('budget_type', e.target.value)}
-        disabled={submitting}
-      >
-        {BUDGET_TYPE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
+          <Select
+            id={`${formId}-budget_type`}
+            label="Budget type"
+            value={values.budget_type}
+            onChange={(e) => setField('budget_type', e.target.value)}
+            disabled={submitting}
+          >
+            {BUDGET_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </>
+      )}
 
-      {budgetNature === 'billable' ? (
+      {/* Client/Site fields - only for billable, hidden in internal hiring preset */}
+      {budgetNature === 'billable' && !isInternalHiringMode ? (
         <>
           <Select
             id={`${formId}-client`}
@@ -309,7 +338,7 @@ export function BudgetPlanForm({
             onChange={(e) => onClientChange(e.target.value)}
             disabled={submitting || clientsLoading || !!clientsError}
           >
-            <option value="">{clientsLoading ? 'Loading clients…' : 'Select client'}</option>
+            <option value="">{clientsLoading ? 'Loading clients...' : 'Select client'}</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({c.code})
@@ -337,7 +366,7 @@ export function BudgetPlanForm({
                 : sitesLookupError
                   ? 'Sites unavailable'
                   : sitesLoading
-                    ? 'Loading sites…'
+                    ? 'Loading sites...'
                     : 'All sites / optional'}
             </option>
             {sites.map((s) => (
@@ -351,25 +380,33 @@ export function BudgetPlanForm({
             <p className="text-sm text-status-danger">Site does not belong to the selected client.</p>
           ) : null}
         </>
-      ) : (
+      ) : null}
+
+      {/* Department field - for non-billable, always shown in internal hiring preset */}
+      {budgetNature === 'non_billable' || isInternalHiringMode ? (
         <>
           <Select
             id={`${formId}-department`}
-            label="Department"
+            label={isInternalHiringMode ? 'Department *' : 'Department'}
             value={values.department}
             onChange={(e) => setField('department', e.target.value)}
             disabled={submitting || departmentsLoading || !!departmentsError}
           >
-            <option value="">{departmentsLoading ? 'Loading departments…' : 'Select department'}</option>
+            <option value="">{departmentsLoading ? 'Loading departments...' : 'Select department'}</option>
             {departments.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name} ({d.code})
               </option>
             ))}
           </Select>
+          {isInternalHiringMode ? (
+            <p className="text-xs text-app-subtle">
+              This budget will fund non-billable MRF requests for this department.
+            </p>
+          ) : null}
           {mergeErr('department') ? <p className="text-sm text-status-danger">{mergeErr('department')}</p> : null}
         </>
-      )}
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Input

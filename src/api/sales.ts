@@ -1,5 +1,6 @@
 import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
+import type { UserRow } from '@/api/users'
 import type {
   GenerateRoleRequirementsResult,
   ProposalBreakupLine,
@@ -77,6 +78,13 @@ export async function submitLeadToOperations(
 ): Promise<SalesLead> {
   const { data } = await api.post<SalesLead>(`/api/sales/leads/${id}/submit-to-operations/`, payload ?? {})
   return data
+}
+
+export async function listEligibleOperationsOwnersForLead(
+  id: number,
+): Promise<{ items: UserRow[]; count?: number }> {
+  const { data } = await api.get<UserRow[]>(`/api/sales/leads/${id}/eligible-operations-owners/`)
+  return { items: data, count: data.length }
 }
 
 export interface GenerateProposalError {
@@ -455,14 +463,26 @@ export interface SendProposalToClientPayload {
   recipient_email: string
   recipient_name?: string
   expires_days?: number | null
+  email_subject?: string
+  email_body?: string
+  /** Legacy — not sent from UI; backend may still accept for older clients */
   note?: string
+}
+
+export interface SendProposalToClientResponse {
+  proposal: ProposalVersion
+  token_expires_at: string
+  email_sent: boolean
+  recipient_email: string
+  email_subject?: string
+  email_body?: string
 }
 
 export async function sendProposalToClient(
   id: number,
   payload: SendProposalToClientPayload,
-): Promise<ProposalVersion> {
-  const { data } = await api.post<ProposalVersion>(
+): Promise<SendProposalToClientResponse> {
+  const { data } = await api.post<SendProposalToClientResponse>(
     `/api/sales/proposal-versions/${id}/send-to-client/`,
     payload,
   )

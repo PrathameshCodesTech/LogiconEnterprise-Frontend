@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   FileText,
   IndianRupee,
   Lock,
+  Mail,
   Send,
   Users,
 } from 'lucide-react'
@@ -15,6 +16,7 @@ import {
   convertProposalToMobilisation,
   getProposalVersion,
   getSalesLead,
+  listEligibleOperationsOwnersForLead,
   listProposalBudgetLines,
   listProposalBreakupLines,
   listProposalVersions,
@@ -23,7 +25,7 @@ import {
   updateProposalBudgetLine,
   updateProposalBreakupLine,
 } from '@/api/sales'
-import { listUsers, type UserRow } from '@/api/users'
+import type { UserRow } from '@/api/users'
 import { listAvailableApprovalRoutes } from '@/api/workflow'
 import { ROUTES } from '@/app/routes'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -35,14 +37,13 @@ import {
   proposalStatusLabel,
   proposalStatusVariant,
 } from '@/features/sales/salesUtils'
-import { CAP, hasAnyCapability } from '@/lib/capabilities'
+import { CAP, hasAllCapabilities, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
-import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
@@ -51,6 +52,7 @@ import {
   buildBreakupRoleGroups,
   getBreakupComponentStyle,
   getBreakupRoleBandStyle,
+  getUnmappedBreakupLines,
 } from '@/features/sales/salesBreakupGrouping'
 import { cn } from '@/lib/cn'
 import type {
@@ -118,59 +120,191 @@ type RowSaveState = { saving: boolean; error: string | null }
 function rowStatus(saveStates: Record<string, RowSaveState>, key: string) {
   const st = saveStates[key]
   if (!st) return null
-  if (st.saving) return <span className="text-xs text-app-subtle italic">Saving…</span>
+  if (st.saving) return <span className="text-xs text-app-subtle italic">Saving...</span>
   if (st.error) return (
     <span className="text-xs text-status-danger" title={st.error}>Error</span>
   )
   return null
 }
 
-// ─── Send-to-client drawer ────────────────────────────────────────────────────
+// --- Send-to-client drawer (Gmail-style compose) --------------------------------
+
+function buildDefaultEmailSubject(proposal: ProposalVersion, lead: SalesLead): string {
+  return `Proposal v${proposal.version_number} for ${lead.client_name} - review and response`
+}
+
+function buildDefaultEmailBody(
+  proposal: ProposalVersion,
+  lead: SalesLead,
+  recipientName: string,
+): string {
+  const greeting = recipientName.trim() || lead.client_contact_person?.trim() || 'there'
+  const grandTotal = formatIndianCurrency(proposal.grand_total)
+  return [
+    `Hello ${greeting},`,
+    '',
+    `Please review the commercial proposal prepared for ${lead.client_name}.`,
+    '',
+    `Proposal version: v${proposal.version_number}`,
+    `Grand total: ${grandTotal}`,
+    '',
+    'You can review the proposal and submit your response using the secure link below.',
+  ].join('\n')
+}
+
+type SendToClientMode = 'send' | 'resend'
+
+function clientHasResponded(proposal: ProposalVersion): boolean {
+  const status = proposal.client_approval_status?.trim().toLowerCase()
+  if (!status || status === 'not_sent' || status === 'pending') return false
+  return true
+}
+
+function canInitialSendProposal(proposal: ProposalVersion, canSendCap: boolean): boolean {
+  return canSendCap && proposal.status === 'internally_approved'
+}
+
+function canResendProposal(proposal: ProposalVersion, canSendCap: boolean): boolean {
+  return (
+    canSendCap &&
+    proposal.status === 'sent_to_client' &&
+    proposal.client_approval_status === 'pending'
+  )
+}
+
+function getClientSendBlocker(proposal: ProposalVersion, canSendCap: boolean): string {
+  if (!canSendCap) {
+    return 'You do not have permission to send proposals to clients.'
+  }
+  if (clientHasResponded(proposal)) {
+    return 'Client has already responded. Resend is not available.'
+  }
+  if (proposal.status === 'internally_approved') {
+    return 'You do not have permission to send proposals to clients.'
+  }
+  if (proposal.status === 'sent_to_client' && proposal.client_approval_status !== 'pending') {
+    return 'Client has already responded. Resend is not available.'
+  }
+  const preSendStatuses = new Set([
+    'draft',
+    'generated',
+    'submitted_internal',
+    'pending_internal_approval',
+    'internal_approval',
+    'sales_review',
+    'budget_generated',
+  ])
+  if (preSendStatuses.has(proposal.status)) {
+    return 'Proposal must complete internal approval before it can be sent to the client.'
+  }
+  return `Proposal cannot be sent in its current status (${proposalStatusLabel(proposal.status)}).`
+}
+
+// Gmail-style input class - clean underline style
+const gmailInputClass =
+  'w-full border-0 border-b border-[#dadce0] bg-transparent py-2 text-[14px] text-[#202124] placeholder:text-[#5f6368] focus:border-b-2 focus:border-[#1a73e8] focus:outline-none transition-colors dark:text-app-text dark:border-app-border dark:focus:border-brand-500'
+
+function GmailComposeRow({
+  label,
+  children,
+  error,
+}: {
+  label: string
+  children: ReactNode
+  error?: string | null
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-1">
+      <span className="w-16 shrink-0 text-[13px] text-[#5f6368] dark:text-app-subtle">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+      {error ? <p className="text-[12px] text-[#d93025]">{error}</p> : null}
+    </div>
+  )
+}
 
 function SendToClientDrawer({
   open,
   onClose,
   onSent,
   proposalId,
+  proposal,
   lead,
+  mode,
 }: {
   open: boolean
   onClose: () => void
   onSent: (updated: ProposalVersion) => void
   proposalId: number
+  proposal: ProposalVersion | null
   lead: SalesLead | null
+  mode: SendToClientMode
 }) {
+  const isResend = mode === 'resend'
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [days, setDays] = useState('')
-  const [note, setNote] = useState('')
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<{
+    email?: string
+    subject?: string
+    message?: string
+    days?: string
+  }>({})
 
   useEffect(() => {
-    if (!open) return
-    setEmail(lead?.client_email ?? '')
-    setName(lead?.client_contact_person ?? '')
+    if (!open || !lead || !proposal) return
+    const contact = lead.client_contact_person ?? ''
+    setEmail(lead.client_email ?? '')
+    setName(contact)
     setDays('')
-    setNote('')
-    setError(null)
-  }, [open, lead?.client_email, lead?.client_contact_person])
+    setSubject(buildDefaultEmailSubject(proposal, lead))
+    setMessage(buildDefaultEmailBody(proposal, lead, contact))
+    setApiError(null)
+    setFieldErrors({})
+  }, [open, lead, proposal])
+
+  function validate(): boolean {
+    const next: typeof fieldErrors = {}
+    const trimmedEmail = email.trim()
+    const trimmedSubject = subject.trim()
+    const trimmedMessage = message.trim()
+
+    if (!trimmedEmail) next.email = 'Recipient email is required.'
+    if (!trimmedSubject) next.subject = 'Email subject is required.'
+    else if (/[\r\n]/.test(trimmedSubject)) next.subject = 'Subject must be a single line.'
+    else if (trimmedSubject.length > 255) next.subject = 'Subject must be 255 characters or fewer.'
+
+    if (!trimmedMessage) next.message = 'Email message is required.'
+    else if (trimmedMessage.length > 5000) next.message = 'Message must be 5000 characters or fewer.'
+
+    if (days.trim()) {
+      const n = Number(days)
+      if (!Number.isFinite(n) || n <= 0) next.days = 'Link expiry must be a positive number.'
+    }
+
+    setFieldErrors(next)
+    return Object.keys(next).length === 0
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!email.trim()) { setError('Recipient email is required.'); return }
+    if (!validate()) return
     setSubmitting(true)
-    setError(null)
+    setApiError(null)
     try {
-      const updated = await sendProposalToClient(proposalId, {
+      const result = await sendProposalToClient(proposalId, {
         recipient_email: email.trim(),
         recipient_name: name.trim() || undefined,
-        expires_days: days ? Number(days) : undefined,
-        note: note.trim() || undefined,
+        expires_days: days.trim() ? Number(days) : undefined,
+        email_subject: subject.trim(),
+        email_body: message.trim(),
       })
-      onSent(updated)
+      onSent(result.proposal)
     } catch (err: unknown) {
-      setError(parseApiError(err, 'Failed to send proposal').message)
+      setApiError(parseApiError(err, 'Failed to send proposal').message)
     } finally {
       setSubmitting(false)
     }
@@ -179,52 +313,149 @@ function SendToClientDrawer({
   return (
     <Drawer
       open={open}
-      title="Send proposal to client"
-      description="The client will receive a link to review and respond to the proposal."
+      title={
+        <span className="inline-flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded bg-[#ea4335]">
+            <Mail className="h-4 w-4 text-white" />
+          </span>
+          <span className="text-[#202124] dark:text-app-text">{isResend ? 'Resend proposal' : 'New Message'}</span>
+        </span>
+      }
+      description="Review the email draft before sending."
+      panelClassName="max-w-[600px]"
       onClose={onClose}
       footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
-          <Button form="send-to-client-form" type="submit" disabled={submitting}>
-            {submitting ? 'Sending…' : 'Send'}
-          </Button>
+        <div className="flex items-center justify-between border-t border-[#dadce0] bg-[#f8f9fa] px-4 py-3 dark:bg-app-muted dark:border-app-border">
+          <div className="flex items-center gap-3">
+            <button
+              form="send-to-client-form"
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-2 rounded bg-[#1a73e8] px-6 py-2 text-[14px] font-medium text-white shadow-sm transition-all hover:bg-[#1557b0] hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Send className="h-4 w-4" aria-hidden />
+              {submitting ? 'Sending...' : 'Send'}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="text-[14px] font-medium text-[#d93025] hover:text-[#a50e0e] disabled:opacity-50 transition-colors"
+          >
+            Discard
+          </button>
         </div>
       }
     >
-      <form id="send-to-client-form" onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-        {error ? <p className="text-sm text-status-danger">{error}</p> : null}
-        <Input
-          id="stc-email"
-          label="Recipient email *"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <p className="-mt-3 text-xs text-app-subtle">
-          Defaults from the sales lead. You can change it before sending.
-        </p>
-        <Input
-          id="stc-name"
-          label="Recipient name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Input
-          id="stc-days"
-          label="Link expires in (days)"
-          type="number"
-          min={1}
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-          placeholder="e.g. 30"
-        />
-        <Input
-          id="stc-note"
-          label="Note to client"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
+      <form
+        id="send-to-client-form"
+        onSubmit={(e) => void handleSubmit(e)}
+        className="flex flex-col h-full"
+      >
+        {/* API Error */}
+        {apiError ? (
+          <div className="mx-4 mb-3 rounded border-l-4 border-[#d93025] bg-[#fce8e6] px-3 py-2 text-[13px] text-[#d93025]">
+            {apiError}
+          </div>
+        ) : null}
+
+        {/* Form Fields - Gmail style */}
+        <div className="border-b border-[#dadce0] dark:border-app-border">
+          {/* To Field with chip */}
+          <GmailComposeRow label="To" error={fieldErrors.email}>
+            {email ? (
+              <div className="flex items-center gap-2 py-1.5">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f0fe] px-3 py-1 text-[13px] text-[#1a73e8] dark:bg-brand-500/20 dark:text-brand-400">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1a73e8] text-[10px] font-medium text-white dark:bg-brand-500">
+                    {(name || email).charAt(0).toUpperCase()}
+                  </span>
+                  {email}
+                </span>
+                <input
+                  id="stc-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="sr-only"
+                />
+              </div>
+            ) : (
+              <input
+                id="stc-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Recipients"
+                className={gmailInputClass}
+              />
+            )}
+          </GmailComposeRow>
+
+          {/* Name Field */}
+          <GmailComposeRow label="Name">
+            <input
+              id="stc-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Contact name"
+              className={gmailInputClass}
+            />
+          </GmailComposeRow>
+
+          {/* Subject Field */}
+          <GmailComposeRow label="Subject" error={fieldErrors.subject}>
+            <input
+              id="stc-subject"
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Subject"
+              maxLength={255}
+              className={gmailInputClass}
+            />
+          </GmailComposeRow>
+
+          {/* Expires Field */}
+          <GmailComposeRow label="Expires" error={fieldErrors.days}>
+            <input
+              id="stc-days"
+              type="number"
+              min={1}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+              placeholder="Days (optional)"
+              className={gmailInputClass}
+            />
+          </GmailComposeRow>
+        </div>
+
+        {/* Message Body - Gmail style */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <textarea
+            id="stc-message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Compose email"
+            maxLength={5000}
+            className="flex-1 min-h-[280px] resize-none border-0 bg-white px-4 py-4 text-[14px] leading-relaxed text-[#202124] placeholder:text-[#5f6368] focus:outline-none dark:bg-app-surface dark:text-app-text"
+          />
+          <div className="flex items-center justify-between border-t border-[#dadce0] bg-[#f8f9fa] px-4 py-2 dark:bg-app-muted dark:border-app-border">
+            {fieldErrors.message ? (
+              <p className="text-[12px] text-[#d93025]">{fieldErrors.message}</p>
+            ) : (
+              <p className="text-[11px] text-[#5f6368] dark:text-app-subtle">
+                {message.length}/5000
+              </p>
+            )}
+            <p className="text-[11px] text-[#5f6368] dark:text-app-subtle">
+              Secure link appended automatically
+            </p>
+          </div>
+        </div>
       </form>
     </Drawer>
   )
@@ -239,7 +470,10 @@ export function SalesProposalWorkspacePage() {
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
   const canUpdate = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_UPDATE])
   const canSendToClient = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_SEND_TO_CLIENT])
-  const canApproveProposal = hasAnyCapability(meCaps, [CAP.SALES_PROPOSAL_APPROVE])
+  const canConvertToMobilisation = hasAllCapabilities(meCaps, [
+    CAP.SALES_PROPOSAL_UPDATE,
+    CAP.MOBILISATION_CREATE,
+  ])
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -262,6 +496,14 @@ export function SalesProposalWorkspacePage() {
 
   // Send to client
   const [sendDrawerOpen, setSendDrawerOpen] = useState(false)
+  const [sendDrawerMode, setSendDrawerMode] = useState<SendToClientMode>('send')
+  const [clientSendSuccess, setClientSendSuccess] = useState<string | null>(null)
+
+  function openSendDrawer(mode: SendToClientMode) {
+    setSendDrawerMode(mode)
+    setClientSendSuccess(null)
+    setSendDrawerOpen(true)
+  }
 
   // Clone state
   const [cloneBusy, setCloneBusy] = useState(false)
@@ -276,6 +518,10 @@ export function SalesProposalWorkspacePage() {
   const [opsUsersLoading, setOpsUsersLoading] = useState(false)
   const [opsUsersError, setOpsUsersError] = useState<string | null>(null)
   const [convertValidationError, setConvertValidationError] = useState<string | null>(null)
+  const [mobilisationHandoff, setMobilisationHandoff] = useState<{
+    id: number
+    ownerName: string
+  } | null>(null)
 
   const isLocked = proposal ? LOCKED_STATUSES.has(proposal.status) : true
   const canEdit = canUpdate && !isLocked
@@ -358,6 +604,13 @@ export function SalesProposalWorkspacePage() {
 
   async function handleSubmitApproval() {
     if (!proposal) return
+    const unmappedBreakupLines = getUnmappedBreakupLines(breakupLines)
+    if (unmappedBreakupLines.length > 0) {
+      setApprovalError(
+        'Salary breakup is missing role mapping. Regenerate this proposal before submitting for approval.',
+      )
+      return
+    }
     setApprovalBusy(true)
     setApprovalError(null)
     setApprovalSuccess(false)
@@ -393,7 +646,12 @@ export function SalesProposalWorkspacePage() {
     setConvertError(null)
     try {
       const result = await convertProposalToMobilisation(proposal.id, { operations_owner: operationsOwnerId })
-      navigate(`/mobilisation/${result.id}`)
+      const owner = opsUsers.find((u) => u.id === operationsOwnerId)
+      setMobilisationHandoff({
+        id: result.id,
+        ownerName: owner?.username ?? 'operations team',
+      })
+      setConvertDrawerOpen(false)
     } catch (e: unknown) {
       setConvertError(parseApiError(e, 'Conversion failed').message)
     } finally {
@@ -402,16 +660,16 @@ export function SalesProposalWorkspacePage() {
   }
 
   useEffect(() => {
-    if (!convertDrawerOpen) return
+    if (!convertDrawerOpen || !proposal?.lead) return
     let cancelled = false
     void (async () => {
       setOpsUsersLoading(true)
       setOpsUsersError(null)
       try {
-        const res = await listUsers({ user_type: 'internal', is_active: true, page: 1 })
+        const res = await listEligibleOperationsOwnersForLead(Number(proposal.lead))
         if (!cancelled) setOpsUsers(res.items)
       } catch (e: unknown) {
-        if (!cancelled) setOpsUsersError(parseApiError(e, 'Could not load internal users').message)
+        if (!cancelled) setOpsUsersError(parseApiError(e, 'Could not load operations owners').message)
       } finally {
         if (!cancelled) setOpsUsersLoading(false)
       }
@@ -419,7 +677,7 @@ export function SalesProposalWorkspacePage() {
     return () => {
       cancelled = true
     }
-  }, [convertDrawerOpen])
+  }, [convertDrawerOpen, proposal?.lead])
 
   // ── Tab: Overview ──────────────────────────────────────────────────────────
 
@@ -589,7 +847,7 @@ export function SalesProposalWorkspacePage() {
             {canUpdate && isLocked ? (
               <Button variant="secondary" className="rounded-lg" onClick={() => void handleClone()} disabled={cloneBusy}>
                 <FileText className="mr-1.5 h-4 w-4" />
-                {cloneBusy ? 'Creating…' : 'Create revision'}
+                {cloneBusy ? 'Creating...' : 'Create revision'}
               </Button>
             ) : null}
           </div>
@@ -769,6 +1027,7 @@ export function SalesProposalWorkspacePage() {
 
   function salaryBreakupTab() {
     const roleGroups = buildBreakupRoleGroups(breakupLines, budgetLines)
+    const unmappedBreakupLines = getUnmappedBreakupLines(breakupLines)
 
     return (
       <div className="space-y-5">
@@ -779,7 +1038,16 @@ export function SalesProposalWorkspacePage() {
           </div>
         ) : null}
 
-        {breakupLines.length === 0 ? (
+        {unmappedBreakupLines.length > 0 ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+            <p className="font-semibold">Salary breakup is missing role mapping.</p>
+            <p className="mt-1">
+              {unmappedBreakupLines.length} component
+              {unmappedBreakupLines.length !== 1 ? 's are' : ' is'} not linked to a role requirement.
+              Regenerate this proposal so every salary component is tied to a role before review.
+            </p>
+          </div>
+        ) : breakupLines.length === 0 ? (
           <EmptyState title="No salary breakup lines" description="Breakup lines will appear here once computed by the backend." />
         ) : (
           <>
@@ -982,6 +1250,8 @@ export function SalesProposalWorkspacePage() {
   function approvalTab() {
     if (!proposal) return null
     const canSubmit = canUpdate && !isLocked
+    const unmappedBreakupLines = getUnmappedBreakupLines(breakupLines)
+    const hasUnmappedBreakupLines = unmappedBreakupLines.length > 0
 
     const selectedRouteObj = approvalRoutes.find((r) => String(r.id) === selectedRoute)
 
@@ -1051,14 +1321,19 @@ export function SalesProposalWorkspacePage() {
               ) : null}
 
               {approvalError ? <p className="text-sm text-status-danger">{approvalError}</p> : null}
+              {hasUnmappedBreakupLines ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  Salary breakup is missing role mapping. Regenerate this proposal before submitting for approval.
+                </div>
+              ) : null}
 
               <Button
                 className="rounded-lg"
                 onClick={() => void handleSubmitApproval()}
-                disabled={approvalBusy || approvalSuccess}
+                disabled={approvalBusy || approvalSuccess || hasUnmappedBreakupLines}
               >
                 <Send className="mr-1.5 h-4 w-4" />
-                {approvalBusy ? 'Submitting…' : 'Submit for internal approval'}
+                {approvalBusy ? 'Submitting...' : 'Submit for internal approval'}
               </Button>
             </div>
           </section>
@@ -1104,36 +1379,80 @@ export function SalesProposalWorkspacePage() {
 
   function clientResponseTab() {
     if (!proposal) return null
-    const canSend = canSendToClient && proposal.status === 'internally_approved'
+    const showInitialSend = canInitialSendProposal(proposal, canSendToClient)
+    const showResend = canResendProposal(proposal, canSendToClient)
+    const showResponded = clientHasResponded(proposal)
 
     return (
       <div className="space-y-6">
-        {/* Send section */}
-        <section>
-          <div className="mb-4 flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
-              <Send className="h-4 w-4 text-brand-600" />
-            </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Send to Client</h3>
+        {clientSendSuccess ? (
+          <div className="flex items-start gap-2 rounded-xl border border-status-hired/30 bg-status-hired/10 px-4 py-3">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-hired" aria-hidden />
+            <p className="text-sm text-app-text">{clientSendSuccess}</p>
           </div>
-          {canSend ? (
-            <Button className="rounded-lg bg-brand-600 hover:bg-brand-700" onClick={() => setSendDrawerOpen(true)}>
-              <Send className="mr-1.5 h-4 w-4" />
-              Send proposal to client
-            </Button>
-          ) : (
-            <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
-              <p className="text-sm text-app-secondary">
-                {proposal.status === 'internally_approved'
-                  ? 'You do not have permission to send proposals to clients.'
-                  : 'Proposal must be internally approved before sending to the client.'}
-              </p>
-            </div>
-          )}
-        </section>
+        ) : null}
 
-        {/* Client response summary */}
-        {proposal.client_approval_status ? (
+        {!showResponded ? (
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
+                <Send className="h-4 w-4 text-brand-600" />
+              </div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Send to Client</h3>
+            </div>
+
+            {showInitialSend ? (
+              <Button className="rounded-lg bg-brand-600 hover:bg-brand-700" onClick={() => openSendDrawer('send')}>
+                <Send className="mr-1.5 h-4 w-4" />
+                Send proposal to client
+              </Button>
+            ) : showResend ? (
+              <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-5 shadow-sm dark:border-brand-800/50 dark:bg-brand-950/20">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
+                    <Send className="h-5 w-5 text-brand-600" aria-hidden />
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div>
+                      <p className="text-sm font-semibold text-app-heading">Proposal sent to client</p>
+                      <p className="mt-1 text-sm text-app-secondary">Waiting for client response.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-app-subtle">Response:</span>
+                      <Badge variant={proposalStatusVariant('pending')} className="text-[10px]">
+                        {proposalStatusLabel('pending')}
+                      </Badge>
+                    </div>
+                    {proposal.sent_to_client_at ? (
+                      <p className="flex items-center gap-1.5 text-xs text-app-secondary">
+                        <Clock className="h-3.5 w-3.5 shrink-0 text-app-subtle" aria-hidden />
+                        Sent {formatDateTime(proposal.sent_to_client_at)}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-app-subtle">
+                      Resending creates a new secure link. Older unused links will stop working.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="rounded-lg"
+                      onClick={() => openSendDrawer('resend')}
+                    >
+                      <Send className="mr-1.5 h-4 w-4" aria-hidden />
+                      Resend proposal link
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-app-border bg-slate-50/50 p-4 shadow-sm dark:bg-slate-800/20">
+                <p className="text-sm text-app-secondary">{getClientSendBlocker(proposal, canSendToClient)}</p>
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {showResponded ? (
           <section>
             <div className="mb-4 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
@@ -1144,15 +1463,15 @@ export function SalesProposalWorkspacePage() {
             <div className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
-                  <dt className="text-xs text-app-subtle mb-2">Response</dt>
+                  <dt className="mb-2 text-xs text-app-subtle">Response</dt>
                   <Badge variant={proposalStatusVariant(proposal.client_approval_status)} className="text-xs">
                     {proposalStatusLabel(proposal.client_approval_status)}
                   </Badge>
                 </div>
                 {(proposal.client_response_at ?? proposal.client_approved_at) ? (
                   <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
-                    <dt className="flex items-center gap-1.5 text-xs text-app-subtle mb-2">
-                      <Clock className="h-3 w-3" />
+                    <dt className="mb-2 flex items-center gap-1.5 text-xs text-app-subtle">
+                      <Clock className="h-3 w-3" aria-hidden />
                       Responded at
                     </dt>
                     <dd className="text-sm font-medium text-app-text">
@@ -1160,29 +1479,31 @@ export function SalesProposalWorkspacePage() {
                     </dd>
                   </div>
                 ) : null}
+                {proposal.sent_to_client_at ? (
+                  <div className="rounded-xl border border-app-border bg-app-surface p-4 shadow-sm">
+                    <dt className="mb-2 flex items-center gap-1.5 text-xs text-app-subtle">
+                      <Send className="h-3 w-3" aria-hidden />
+                      Sent to client
+                    </dt>
+                    <dd className="text-sm font-medium text-app-text">{formatDateTime(proposal.sent_to_client_at)}</dd>
+                  </div>
+                ) : null}
               </div>
               {proposal.client_remarks ? (
-                <div className="rounded-xl border border-app-border bg-slate-50/50 dark:bg-slate-800/20 p-4 shadow-sm">
+                <div className="rounded-xl border border-app-border bg-slate-50/50 p-4 shadow-sm dark:bg-slate-800/20">
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-app-subtle">
-                    <FileText className="h-3 w-3" />
+                    <FileText className="h-3 w-3" aria-hidden />
                     Client remarks
                   </p>
-                  <p className="whitespace-pre-line text-sm text-app-text leading-relaxed">{proposal.client_remarks}</p>
+                  <p className="whitespace-pre-line text-sm leading-relaxed text-app-text">{proposal.client_remarks}</p>
                 </div>
               ) : null}
-            </div>
-          </section>
-        ) : proposal.status === 'sent_to_client' ? (
-          <section className="rounded-xl border border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-900/10 p-4">
-            <div className="flex items-center gap-2.5">
-              <Clock className="h-4 w-4 text-amber-600" />
-              <p className="text-sm text-amber-700 dark:text-amber-400">Awaiting client response...</p>
             </div>
           </section>
         ) : null}
 
         {/* Convert to mobilisation */}
-        {canApproveProposal ? (
+        {canConvertToMobilisation ? (
           <section>
             <div className="mb-4 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
@@ -1190,7 +1511,24 @@ export function SalesProposalWorkspacePage() {
               </div>
               <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Convert to Mobilisation</h3>
             </div>
-            {proposal.client_approval_status === 'approved' ? (
+            {mobilisationHandoff ? (
+              <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-5 shadow-sm dark:border-brand-800/50 dark:bg-brand-950/20">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
+                    <CheckCircle2 className="h-5 w-5 text-brand-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-app-heading">Mobilisation handoff created</p>
+                    <p className="mt-1 text-sm text-app-secondary">
+                      Operations owner: <span className="font-medium text-app-text">{mobilisationHandoff.ownerName}</span>
+                    </p>
+                    <p className="mt-1 text-sm text-app-secondary">
+                      The operations team will complete client users and setup readiness for {lead?.client_name ?? 'this client'}.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : proposal.client_approval_status === 'approved' ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10 p-5 shadow-sm">
                 <div className="flex items-start gap-4">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
@@ -1239,7 +1577,7 @@ export function SalesProposalWorkspacePage() {
       <Drawer
         open={convertDrawerOpen}
         title="Convert to mobilisation"
-        description="Select an operations owner. This person will complete departments and client users before finalization."
+        description="Select an operations owner. This person will complete client users and setup readiness before finalization."
         onClose={() => !convertBusy && setConvertDrawerOpen(false)}
         footer={
           <div className="flex justify-end gap-2">
@@ -1263,7 +1601,7 @@ export function SalesProposalWorkspacePage() {
                 void handleConvert(ownerId)
               }}
             >
-              {convertBusy ? 'Converting…' : 'Convert'}
+              {convertBusy ? 'Converting...' : 'Convert'}
             </Button>
           </div>
         }
@@ -1277,7 +1615,7 @@ export function SalesProposalWorkspacePage() {
             disabled={opsUsersLoading || convertBusy}
             error={convertValidationError ?? undefined}
           >
-            <option value="">{opsUsersLoading ? 'Loading users…' : 'Select a user'}</option>
+            <option value="">{opsUsersLoading ? 'Loading users...' : 'Select a user'}</option>
             {opsUsers.map((u) => (
               <option key={u.id} value={String(u.id)}>
                 {u.username} ({u.first_name} {u.last_name})
@@ -1285,7 +1623,7 @@ export function SalesProposalWorkspacePage() {
             ))}
           </Select>
           <p className="text-xs text-app-subtle">
-            This person will complete departments and client users before finalization.
+            This person will complete client users and setup readiness before finalization.
           </p>
           {opsUsersError ? <ErrorState message={opsUsersError} /> : null}
           {convertError ? <ErrorState message={convertError} /> : null}
@@ -1345,7 +1683,7 @@ export function SalesProposalWorkspacePage() {
                 </p>
                 <Button className="mt-3 rounded-lg" onClick={() => void handleClone()} disabled={cloneBusy}>
                   <FileText className="mr-1.5 h-4 w-4" />
-                  {cloneBusy ? 'Creating…' : 'Create revision'}
+                  {cloneBusy ? 'Creating...' : 'Create revision'}
                 </Button>
                 {cloneError ? <p className="mt-2 text-sm text-status-danger">{cloneError}</p> : null}
               </div>
@@ -1423,7 +1761,7 @@ export function SalesProposalWorkspacePage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  if (loading) return <Spinner label="Loading proposal…" />
+  if (loading) return <Spinner label="Loading proposal..." />
   if (loadError) return <ErrorState message={loadError} />
   if (!proposal) return null
 
@@ -1527,12 +1865,17 @@ export function SalesProposalWorkspacePage() {
 
       <SendToClientDrawer
         open={sendDrawerOpen}
+        mode={sendDrawerMode}
         proposalId={proposal.id}
+        proposal={proposal}
         lead={lead}
         onClose={() => setSendDrawerOpen(false)}
         onSent={(updated) => {
           setProposal(updated)
           setSendDrawerOpen(false)
+          setClientSendSuccess(
+            sendDrawerMode === 'resend' ? 'Proposal link resent to client.' : 'Proposal sent to client.',
+          )
         }}
       />
       {convertDrawer()}

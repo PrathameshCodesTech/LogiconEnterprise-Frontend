@@ -305,6 +305,18 @@ export function MRFReadinessBudgetBlock({
           <dd className="font-medium tabular-nums text-app-text">{formatMoney(budget.total_amount, cur)}</dd>
         </div>
         <div>
+          <dt className="text-app-subtle">Reserved</dt>
+          <dd className="font-medium tabular-nums text-app-text">
+            {formatMoney(budget.reserved_amount, cur)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-app-subtle">Committed</dt>
+          <dd className="font-medium tabular-nums text-app-text">
+            {formatMoney(budget.committed_amount, cur)}
+          </dd>
+        </div>
+        <div>
           <dt className="text-app-subtle">Available now</dt>
           <dd className="font-medium tabular-nums text-app-text">
             {formatMoney(budget.available_amount, cur)}

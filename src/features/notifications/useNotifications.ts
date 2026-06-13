@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { create } from 'zustand'
 import {
+  getNotificationUnreadCount,
   listNotifications,
   markNotificationRead,
   markAllNotificationsRead,
@@ -148,11 +149,14 @@ export function useNotifications() {
     setDropdownLoading(true)
     setError(null)
     try {
-      const res = await listNotifications({ page: 1 })
+      const [res, unread] = await Promise.all([
+        listNotifications({ page: 1 }),
+        getNotificationUnreadCount(),
+      ])
       // Take only latest 10 for dropdown
       const items = res.items.slice(0, 10)
       setNotifications(items)
-      setUnreadCount(items.filter((n) => !n.is_read).length)
+      setUnreadCount(unread.unread_count)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load notifications'
       setError(msg)

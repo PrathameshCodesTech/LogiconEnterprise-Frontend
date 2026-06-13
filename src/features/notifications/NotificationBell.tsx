@@ -3,7 +3,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Check, CheckCheck, ExternalLink, Loader2 } from 'lucide-react'
+import { Bell, Check, CheckCheck, ClipboardList, ExternalLink, FileCheck2, Loader2, Users } from 'lucide-react'
 import { useNotifications } from '@/features/notifications/useNotifications'
 import type { NotificationRow } from '@/features/notifications/types'
 import { cn } from '@/lib/cn'
@@ -23,19 +23,19 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-function getNotificationIcon(type: string): string {
+function getNotificationIcon(type: string): { icon: typeof Bell; bg: string; color: string } {
   switch (type) {
     case 'workflow_task_assigned':
     case 'workflow_completed':
-      return '📋'
+      return { icon: ClipboardList, bg: 'bg-purple-100 dark:bg-purple-900/30', color: 'text-purple-600 dark:text-purple-400' }
     case 'sales_survey_assigned':
     case 'sales_survey_completed':
-      return '📊'
+      return { icon: FileCheck2, bg: 'bg-blue-100 dark:bg-blue-900/30', color: 'text-blue-600 dark:text-blue-400' }
     case 'mobilisation_operations_assigned':
     case 'mobilisation_setup_completed':
-      return '🤝'
+      return { icon: Users, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-600 dark:text-emerald-400' }
     default:
-      return '🔔'
+      return { icon: Bell, bg: 'bg-gray-100 dark:bg-gray-800', color: 'text-gray-600 dark:text-gray-400' }
   }
 }
 
@@ -47,6 +47,7 @@ interface NotificationItemProps {
 
 function NotificationItem({ notification, onMarkRead, onNavigate }: NotificationItemProps) {
   const [marking, setMarking] = useState(false)
+  const { icon: Icon, bg, color } = getNotificationIcon(notification.notification_type)
 
   const handleClick = async () => {
     if (!notification.is_read) {
@@ -70,7 +71,9 @@ function NotificationItem({ notification, onMarkRead, onNavigate }: Notification
           : 'bg-brand-50/50 hover:bg-brand-100/50 dark:bg-brand-950/30 dark:hover:bg-brand-900/40'
       )}
     >
-      <span className="mt-0.5 text-base">{getNotificationIcon(notification.notification_type)}</span>
+      <span className={cn('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg', bg)}>
+        <Icon className={cn('h-4 w-4', color)} />
+      </span>
       <div className="min-w-0 flex-1">
         <p
           className={cn(
@@ -182,14 +185,14 @@ export function NotificationBell({ compact = false }: NotificationBellProps) {
         type="button"
         onClick={handleToggle}
         className={cn(
-          'relative flex items-center justify-center rounded-lg border border-app-border bg-app-surface text-app-text shadow-sm transition-all hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950',
+          'relative flex items-center justify-center rounded-full text-app-secondary transition-all hover:text-app-text hover:bg-app-muted/50',
           compact ? 'h-9 w-9' : 'h-10 w-10'
         )}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
         aria-expanded={open}
         aria-haspopup="true"
       >
-        <Bell className={cn('text-app-secondary', compact ? 'h-4 w-4' : 'h-5 w-5')} />
+        <Bell className={compact ? 'h-5 w-5' : 'h-6 w-6'} />
 
         {/* Unread badge */}
         {unreadCount > 0 ? (

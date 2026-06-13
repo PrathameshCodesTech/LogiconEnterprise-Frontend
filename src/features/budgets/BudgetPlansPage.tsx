@@ -77,6 +77,12 @@ export function BudgetPlansPage() {
   const canCreate = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_CREATE])
   const canUpdate = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_UPDATE])
   const canDelete = !isClient && hasAnyCapability(meCaps, [CAP.BUDGET_DELETE])
+  const canReadClients = hasAnyCapability(meCaps, [CAP.CLIENT_READ])
+  const canReadSites = hasAnyCapability(meCaps, [CAP.SITE_READ])
+  const canReadDepartments = hasAnyCapability(meCaps, [CAP.DEPARTMENT_READ])
+  const showClientFilter = !isClient && canReadClients
+  const showSiteFilter = canReadSites
+  const showDepartmentFilter = !isClient && canReadDepartments
 
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -110,6 +116,7 @@ export function BudgetPlansPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create')
   const [editing, setEditing] = useState<BudgetPlanRow | null>(null)
+  const [formPresetMode, setFormPresetMode] = useState<'internal_hiring' | null>(null)
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [formFields, setFormFields] = useState<Record<string, string>>({})
@@ -148,9 +155,9 @@ export function BudgetPlansPage() {
         search: search || undefined,
         budget_nature: budget_nature || undefined,
         budget_type: budget_type || undefined,
-        client: clientFilter,
-        site: siteFilter,
-        department: departmentFilter,
+        client: showClientFilter ? clientFilter : undefined,
+        site: showSiteFilter ? siteFilter : undefined,
+        department: showDepartmentFilter ? departmentFilter : undefined,
         status: statusFilter || undefined,
         is_active,
         page,
@@ -169,8 +176,11 @@ export function BudgetPlansPage() {
     budget_nature,
     budget_type,
     clientFilter,
+    showClientFilter,
     siteFilter,
+    showSiteFilter,
     departmentFilter,
+    showDepartmentFilter,
     statusFilter,
     is_active,
     page,
@@ -181,7 +191,12 @@ export function BudgetPlansPage() {
   }, [refresh])
 
   useEffect(() => {
-    if (isClient) return
+    if (!showClientFilter) {
+      setClients([])
+      setClientsError(null)
+      setClientsLoading(false)
+      return
+    }
     let cancelled = false
     void (async () => {
       setClientsLoading(true)
@@ -199,10 +214,15 @@ export function BudgetPlansPage() {
     return () => {
       cancelled = true
     }
-  }, [isClient])
+  }, [showClientFilter])
 
   useEffect(() => {
-    if (isClient) return
+    if (!showDepartmentFilter) {
+      setDepartments([])
+      setDepartmentsError(null)
+      setDepartmentsLoading(false)
+      return
+    }
     let cancelled = false
     void (async () => {
       setDepartmentsLoading(true)
@@ -220,15 +240,21 @@ export function BudgetPlansPage() {
     return () => {
       cancelled = true
     }
-  }, [isClient])
+  }, [showDepartmentFilter])
 
   useEffect(() => {
+    if (!showSiteFilter) {
+      setSitesFilter([])
+      setSitesFilterError(null)
+      setSitesLoading(false)
+      return
+    }
     let cancelled = false
     void (async () => {
       setSitesLoading(true)
       setSitesFilterError(null)
       const res = await loadAllSites(
-        typeof clientFilter === 'number' ? { client: clientFilter } : undefined,
+        showClientFilter && typeof clientFilter === 'number' ? { client: clientFilter } : undefined,
       )
       if (cancelled) return
       if (res.ok) {
@@ -242,16 +268,22 @@ export function BudgetPlansPage() {
     return () => {
       cancelled = true
     }
-  }, [clientFilter])
+  }, [clientFilter, showClientFilter, showSiteFilter])
 
   const totalPages = useMemo(() => {
     if (typeof count !== 'number') return undefined
     return Math.max(1, Math.ceil(count / 50))
   }, [count])
 
-  function openCreate() {
+  // Preset detection
+  const isInternalHiringPreset = budget_nature === 'non_billable' && budget_type === 'hiring'
+  const isBillablePreset = budget_nature === 'billable' && !budget_type
+  const isAllPreset = !budget_nature && !budget_type
+
+  function openCreate(presetMode: 'internal_hiring' | null = null) {
     setDrawerMode('create')
     setEditing(null)
+    setFormPresetMode(presetMode)
     setFormError(null)
     setFormFields({})
     setDrawerOpen(true)
@@ -260,6 +292,7 @@ export function BudgetPlansPage() {
   function openEdit(row: BudgetPlanRow) {
     setDrawerMode('edit')
     setEditing(row)
+    setFormPresetMode(null)
     setFormError(null)
     setFormFields({})
     setDrawerOpen(true)
@@ -268,6 +301,7 @@ export function BudgetPlansPage() {
   function closeDrawer() {
     setDrawerOpen(false)
     setFormSubmitting(false)
+    setFormPresetMode(null)
     setFormError(null)
     setFormFields({})
   }
@@ -378,23 +412,75 @@ export function BudgetPlansPage() {
         <div>
           <h2 className="text-lg font-semibold text-app-text">Budgets</h2>
           <p className="text-sm text-app-secondary">
-            {isClient ? 'Approved budgets and their commercial summary.' : 'Allocations by client, site, or department.'}
+            {isClient
+              ? 'Approved budgets and their commercial summary.'
+              : showDepartmentFilter
+                ? 'Allocations by client, site, or department.'
+                : 'Allocations by client or site.'}
           </p>
         </div>
         {canCreate ? (
-          <Button onClick={openCreate} className="sm:self-start">
-            Create budget
+          <Button
+            onClick={() => openCreate(isInternalHiringPreset ? 'internal_hiring' : null)}
+            className="sm:self-start"
+          >
+            {isInternalHiringPreset ? 'Create internal budget' : 'Create budget'}
           </Button>
         ) : null}
       </div>
 
       {deactivateError ? <ErrorState message={deactivateError} /> : null}
 
+      {/* Preset filter buttons */}
+      {!isClient ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={isInternalHiringPreset ? 'primary' : 'secondary'}
+            className="min-h-9 px-3 text-sm"
+            onClick={() =>
+              updateParam({
+                budget_nature: 'non_billable',
+                budget_type: 'hiring',
+                client: null,
+                site: null,
+              })
+            }
+          >
+            Internal hiring budgets
+          </Button>
+          <Button
+            variant={isBillablePreset ? 'primary' : 'secondary'}
+            className="min-h-9 px-3 text-sm"
+            onClick={() =>
+              updateParam({
+                budget_nature: 'billable',
+                budget_type: null,
+                department: null,
+              })
+            }
+          >
+            Billable budgets
+          </Button>
+          <Button
+            variant={isAllPreset ? 'primary' : 'secondary'}
+            className="min-h-9 px-3 text-sm"
+            onClick={() =>
+              updateParam({
+                budget_nature: null,
+                budget_type: null,
+              })
+            }
+          >
+            All budgets
+          </Button>
+        </div>
+      ) : null}
+
       <div className="space-y-3 rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
         <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Filters</p>
-        {!isClient && clientsError ? <ErrorState message={`Client lookup failed. ${clientsError}`} /> : null}
-        {!isClient && departmentsError ? <ErrorState message={`Department lookup failed. ${departmentsError}`} /> : null}
-        {sitesFilterError ? <ErrorState message={`Site lookup failed. ${sitesFilterError}`} /> : null}
+        {showClientFilter && clientsError ? <ErrorState message={`Client lookup failed. ${clientsError}`} /> : null}
+        {showDepartmentFilter && departmentsError ? <ErrorState message={`Department lookup failed. ${departmentsError}`} /> : null}
+        {showSiteFilter && sitesFilterError ? <ErrorState message={`Site lookup failed. ${sitesFilterError}`} /> : null}
         <div className="relative max-w-xl">
           <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-app-subtle">
             <Search className="h-4 w-4" aria-hidden />
@@ -403,7 +489,7 @@ export function BudgetPlansPage() {
             value={search}
             onChange={(e) => updateParam({ search: e.target.value })}
             placeholder="Search name, code"
-            className="min-h-10 w-full rounded-panel border border-app-border bg-app-muted pl-10 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="min-h-10 w-full rounded-panel border border-app-border bg-app-surface pl-10 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             aria-label="Search budgets"
           />
         </div>
@@ -461,7 +547,7 @@ export function BudgetPlansPage() {
           </div>
         ) : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {!isClient ? (
+          {showClientFilter ? (
             <Select
               id="bf-client"
               label="Client"
@@ -481,6 +567,7 @@ export function BudgetPlansPage() {
               ))}
             </Select>
           ) : null}
+          {showSiteFilter ? (
           <Select
             id="bf-site"
             label="Site"
@@ -501,7 +588,8 @@ export function BudgetPlansPage() {
               </option>
             ))}
           </Select>
-          {!isClient ? (
+          ) : null}
+          {showDepartmentFilter ? (
             <Select
               id="bf-dept"
               label="Department"
@@ -636,11 +724,19 @@ export function BudgetPlansPage() {
       <Drawer
         open={drawerOpen}
         onClose={closeDrawer}
-        title={drawerMode === 'create' ? 'Create budget plan' : 'Edit budget plan'}
+        title={
+          drawerMode === 'edit'
+            ? 'Edit budget plan'
+            : formPresetMode === 'internal_hiring'
+              ? 'Create internal hiring budget'
+              : 'Create budget plan'
+        }
         description={
-          drawerMode === 'create'
-            ? 'Billable budgets require a client; non-billable require a department.'
-            : 'Update allocation details.'
+          drawerMode === 'edit'
+            ? 'Update allocation details.'
+            : formPresetMode === 'internal_hiring'
+              ? 'Internal hiring budget for a specific department. Used for non-billable MRF requests.'
+              : 'Billable budgets require a client; non-billable require a department.'
         }
       >
         <BudgetPlanForm
@@ -650,12 +746,13 @@ export function BudgetPlansPage() {
           serverError={formError}
           serverFields={formFields}
           initial={editing}
+          presetMode={formPresetMode}
           clients={clients}
           clientsLoading={clientsLoading}
-          clientsError={clientsError}
+          clientsError={showClientFilter ? clientsError : null}
           departments={departments}
           departmentsLoading={departmentsLoading}
-          departmentsError={departmentsError}
+          departmentsError={showDepartmentFilter ? departmentsError : null}
           onSubmit={submitPayload}
         />
       </Drawer>

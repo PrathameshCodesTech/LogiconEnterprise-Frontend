@@ -14,12 +14,15 @@ import { InterviewPipelineCard } from '@/features/hiring/InterviewPipelineCard'
 import { ApplyInterviewPlanDrawer } from '@/features/hiring/ApplyInterviewPlanDrawer'
 import { InterviewFormDrawer } from '@/features/hiring/InterviewFormDrawer'
 import { InterviewFeedbackDrawer } from '@/features/hiring/InterviewFeedbackDrawer'
+import { isInternalNonBillable, isClientBillable } from '@/features/hiring/hiringLaneLabels'
 import type {
   InterviewPipelineBucket,
   InterviewPipelineBucketItem,
   InterviewPipelineBucketKey,
   InterviewRow,
 } from '@/features/hiring/types'
+
+type LaneFilter = '' | 'client_billable' | 'internal_non_billable'
 
 const BUCKET_ORDER: { key: InterviewPipelineBucketKey; label: string; emptyHint: string }[] = [
   { key: 'ready_for_screening', label: 'Ready for screening', emptyHint: 'No candidates waiting.' },
@@ -61,6 +64,7 @@ export function InterviewPipelinePage() {
   const [searchText, setSearchText] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [siteFilter, setSiteFilter] = useState('')
+  const [laneFilter, setLaneFilter] = useState<LaneFilter>('')
 
   const [applyTarget, setApplyTarget] = useState<InterviewPipelineBucketItem | null>(null)
   const [scheduleState, setScheduleState] = useState<{ item: InterviewPipelineBucketItem; interview?: InterviewRow } | null>(null)
@@ -116,17 +120,20 @@ export function InterviewPipelinePage() {
       }
       if (roleFilter && app.job_role_name !== roleFilter) return false
       if (siteFilter && app.site_name !== siteFilter) return false
+      if (laneFilter === 'client_billable' && !isClientBillable(app)) return false
+      if (laneFilter === 'internal_non_billable' && !isInternalNonBillable(app)) return false
       return true
     },
-    [searchText, roleFilter, siteFilter],
+    [searchText, roleFilter, siteFilter, laneFilter],
   )
 
-  const hasActiveFilter = Boolean(searchText || roleFilter || siteFilter)
+  const hasActiveFilter = Boolean(searchText || roleFilter || siteFilter || laneFilter)
 
   function clearFilters() {
     setSearchText('')
     setRoleFilter('')
     setSiteFilter('')
+    setLaneFilter('')
   }
 
   function openScheduleRound(item: InterviewPipelineBucketItem, key: InterviewPipelineBucketKey) {
@@ -185,6 +192,12 @@ export function InterviewPipelinePage() {
             ))}
           </Select>
         ) : null}
+
+        <Select id="ivp_lane" label="Hiring lane" value={laneFilter} onChange={(e) => setLaneFilter(e.target.value as LaneFilter)} className="w-44">
+          <option value="">All lanes</option>
+          <option value="client_billable">Client Billable</option>
+          <option value="internal_non_billable">Internal Non-billable</option>
+        </Select>
 
         {hasActiveFilter ? (
           <div className="flex flex-col gap-1">

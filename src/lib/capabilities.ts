@@ -53,6 +53,7 @@ export const CAP = {
   CLIENT_ONBOARDING_DELETE: 'client_onboarding.delete',
 
   MOBILISATION_READ: 'mobilisation.read',
+  MOBILISATION_CREATE: 'mobilisation.create',
   MOBILISATION_UPDATE: 'mobilisation.update',
   MOBILISATION_FINALIZE: 'mobilisation.finalize',
   MOBILISATION_MANAGE: 'mobilisation.manage',
@@ -63,6 +64,7 @@ export const CAP = {
 
   SALES_SURVEY_READ: 'sales_survey.read',
   SALES_SURVEY_UPDATE: 'sales_survey.update',
+  SALES_SURVEY_ASSIGN: 'sales_survey.assign',
   SALES_SURVEY_MANAGE: 'sales_survey.manage',
 
   SALES_PROPOSAL_READ: 'sales_proposal.read',
@@ -151,6 +153,5 @@ export const DEPLOYMENT_ANY = [CAP.SITE_DEPLOYMENT_READ, CAP.DEPLOYMENT_READ] as
 
 /** Masters: job roles and/or wage masters */
 export const MASTERS_ANY = [CAP.JOB_ROLE_READ, CAP.WAGE_READ] as const
-
 
 

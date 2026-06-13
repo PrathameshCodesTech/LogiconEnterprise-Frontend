@@ -21,8 +21,6 @@ export type BreakupRoleGroup = {
   total: number
 }
 
-const UNASSIGNED_GROUP_KEY = 'unassigned'
-
 const COMPONENT_TYPE_ORDER: string[] = [
   'earning',
   'employee_deduction',
@@ -71,29 +69,29 @@ export function sortBreakupLines(a: ProposalBreakupLine, b: ProposalBreakupLine)
   return a.id - b.id
 }
 
-export function getBreakupRoleGroupKey(line: ProposalBreakupLine): string {
+export function hasBreakupRoleMapping(line: ProposalBreakupLine): boolean {
+  return line.role_requirement != null && line.role_requirement > 0
+}
+
+export function getUnmappedBreakupLines(lines: ProposalBreakupLine[]): ProposalBreakupLine[] {
+  return lines.filter((line) => !hasBreakupRoleMapping(line))
+}
+
+export function getBreakupRoleGroupKey(line: ProposalBreakupLine): string | null {
   if (line.role_requirement != null && line.role_requirement > 0) {
     return `req:${line.role_requirement}`
   }
-  if (line.job_role != null || line.site != null) {
-    return `role:${line.job_role ?? 0}:site:${line.site ?? 0}`
-  }
-  return UNASSIGNED_GROUP_KEY
+  return null
 }
 
 function buildBudgetLookups(budgetLines: ProposalBudgetLine[]) {
   const byRoleRequirement = new Map<number, ProposalBudgetLine>()
-  const byRoleSite = new Map<string, ProposalBudgetLine>()
   for (const bl of budgetLines) {
     if (bl.role_requirement != null && bl.role_requirement > 0) {
       byRoleRequirement.set(bl.role_requirement, bl)
     }
-    const rsKey = `role:${bl.job_role ?? 0}:site:${bl.site ?? 0}`
-    if (!byRoleSite.has(rsKey)) {
-      byRoleSite.set(rsKey, bl)
-    }
   }
-  return { byRoleRequirement, byRoleSite }
+  return { byRoleRequirement }
 }
 
 function resolveBudgetLine(
@@ -105,18 +103,13 @@ function resolveBudgetLine(
     if (Number.isFinite(id)) return lookups.byRoleRequirement.get(id)
     return undefined
   }
-  if (groupKey.startsWith('role:')) {
-    return lookups.byRoleSite.get(groupKey)
-  }
   return undefined
 }
 
 function resolveRoleTitle(
-  groupKey: string,
   lines: ProposalBreakupLine[],
   budgetLine: ProposalBudgetLine | undefined,
 ): string {
-  if (groupKey === UNASSIGNED_GROUP_KEY) return 'Unassigned breakup'
   const fromBudget = budgetLine?.job_role_name?.trim()
   if (fromBudget) return fromBudget
   const fromLine = lines.find((l) => l.job_role_name?.trim())?.job_role_name?.trim()
@@ -168,6 +161,7 @@ export function buildBreakupRoleGroups(
 
   for (const line of breakupLines) {
     const key = getBreakupRoleGroupKey(line)
+    if (key == null) continue
     if (!lineGroups.has(key)) {
       lineGroups.set(key, [])
       firstSeenOrder.push(key)
@@ -191,7 +185,7 @@ export function buildBreakupRoleGroups(
         groupKey.startsWith('req:') && Number.isFinite(Number(groupKey.slice(4)))
           ? Number(groupKey.slice(4))
           : null,
-      title: resolveRoleTitle(groupKey, lines, budgetLine),
+      title: resolveRoleTitle(lines, budgetLine),
       siteName: resolveSiteName(lines, budgetLine),
       headcount: budgetLine?.manpower_count ?? null,
       unitCost: budgetLine?.unit_cost ?? null,
@@ -208,8 +202,6 @@ export function buildBreakupRoleGroups(
   }
 
   return groups.sort((a, b) => {
-    if (a.groupKey === UNASSIGNED_GROUP_KEY) return 1
-    if (b.groupKey === UNASSIGNED_GROUP_KEY) return -1
     const order = a.budgetSortOrder - b.budgetSortOrder
     if (order !== 0) return order
     return a.title.localeCompare(b.title)
@@ -307,22 +299,7 @@ const ROLE_BAND_PALETTE: BreakupRoleBandStyle[] = [
   },
 ]
 
-const UNASSIGNED_BAND: BreakupRoleBandStyle = {
-  border: 'border-amber-200 dark:border-amber-800',
-  borderAccent: 'border-l-amber-500 dark:border-l-amber-400',
-  headerBg:
-    'bg-gradient-to-r from-amber-50 via-amber-50/70 to-app-surface dark:from-amber-950/40 dark:via-amber-900/20 dark:to-app-surface',
-  headerBorder: 'border-amber-200/80 dark:border-amber-800/80',
-  bodyBg: 'bg-amber-50/20 dark:bg-amber-950/10',
-  iconBg: 'bg-amber-500/15 dark:bg-amber-500/20',
-  iconText: 'text-amber-700 dark:text-amber-400',
-  titleText: 'text-amber-900 dark:text-amber-100',
-  totalText: 'text-amber-800 dark:text-amber-300',
-  metaText: 'text-amber-800/80 dark:text-amber-200/80',
-}
-
 /** Distinct full-width band styling per role so users can scan Electrician vs Plumber, etc. */
-export function getBreakupRoleBandStyle(roleIndex: number, groupKey: string): BreakupRoleBandStyle {
-  if (groupKey === UNASSIGNED_GROUP_KEY) return UNASSIGNED_BAND
+export function getBreakupRoleBandStyle(roleIndex: number, _groupKey: string): BreakupRoleBandStyle {
   return ROLE_BAND_PALETTE[roleIndex % ROLE_BAND_PALETTE.length]!
 }

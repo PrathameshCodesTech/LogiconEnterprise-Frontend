@@ -13,10 +13,11 @@ import {
   Trash2,
   UserPlus,
 } from 'lucide-react'
-import { listRoles, type AccessRole } from '@/api/access'
+import type { AccessRole } from '@/api/access'
 import {
   createMobilisationUser,
   deleteMobilisationUser,
+  getMobilisationEligibleClientRoles,
   getMobilisationSalesContext,
   listMobilisationUsers,
   updateMobilisationUser,
@@ -96,7 +97,7 @@ function formToPayload(form: UserFormState): MobilisationUserWriteInput {
 function validateUserForm(form: UserFormState): string | null {
   if (!form.full_name.trim()) return 'Full name is required.'
   if (!form.email.trim()) return 'Email is required.'
-  if (!form.access_role) return 'Access role is required.'
+  if (!form.access_role) return 'Portal role is required.'
   if (form.scope_level === 'site' && !form.real_site) return 'Site is required for site-level users.'
   return null
 }
@@ -160,13 +161,22 @@ export function ClientUsersPanel({
   }, [refreshUsers])
 
   useEffect(() => {
-    if (!isEditable || (!addDrawerOpen && !editDrawerOpen) || accessRoles.length > 0) return
+    if (!isEditable || (!addDrawerOpen && !editDrawerOpen)) return
     let cancelled = false
     void (async () => {
       setAccessRolesLoading(true)
       try {
-        const res = await listRoles({ is_active: true })
-        if (!cancelled) setAccessRoles(res.items)
+        const res = await getMobilisationEligibleClientRoles(requestId, form.scope_level)
+        if (cancelled) return
+        setAccessRoles(res.items)
+        // Clear role if not in eligible list
+        setForm((prev) => {
+          const currentRoleId = Number(prev.access_role)
+          if (currentRoleId && !res.items.some((r) => r.id === currentRoleId)) {
+            return { ...prev, access_role: '' }
+          }
+          return prev
+        })
       } catch {
         if (!cancelled) setAccessRoles([])
       } finally {
@@ -176,7 +186,7 @@ export function ClientUsersPanel({
     return () => {
       cancelled = true
     }
-  }, [accessRoles.length, addDrawerOpen, editDrawerOpen, isEditable])
+  }, [requestId, form.scope_level, addDrawerOpen, editDrawerOpen, isEditable])
 
   useEffect(() => {
     let cancelled = false
@@ -204,6 +214,14 @@ export function ClientUsersPanel({
 
   function setField(field: keyof UserFormState, value: string | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  function handleScopeChange(newScope: 'client' | 'site') {
+    setForm((prev) => ({
+      ...prev,
+      scope_level: newScope,
+      real_site: newScope === 'client' ? '' : prev.real_site,
+    }))
   }
 
   function openAddDrawer() {
@@ -335,29 +353,39 @@ export function ClientUsersPanel({
         disabled={formSubmitting}
       />
       <Select
+        id="mob_user_scope"
+        label="User scope"
+        value={form.scope_level}
+        onChange={(e) => handleScopeChange(e.target.value as 'client' | 'site')}
+        disabled={formSubmitting}
+      >
+        <option value="client">Client-level user</option>
+        <option value="site">Site-level user</option>
+      </Select>
+      <p className="mt-1 text-xs text-app-subtle">
+        {form.scope_level === 'client'
+          ? 'Can access company-level portal data for this client.'
+          : 'Can access only the selected site.'}
+      </p>
+      <Select
         id="mob_user_access_role"
-        label="Access role *"
+        label="Portal role *"
         value={form.access_role}
         onChange={(e) => setField('access_role', e.target.value)}
         disabled={formSubmitting || accessRolesLoading}
       >
-        <option value="">{accessRolesLoading ? 'Loading roles…' : 'Select a role'}</option>
+        <option value="">{accessRolesLoading ? 'Loading roles...' : 'Select a portal role'}</option>
         {accessRoles.map((role) => (
           <option key={role.id} value={String(role.id)}>
             {role.name}
           </option>
         ))}
       </Select>
-      <Select
-        id="mob_user_scope"
-        label="Scope"
-        value={form.scope_level}
-        onChange={(e) => setField('scope_level', e.target.value as 'client' | 'site')}
-        disabled={formSubmitting}
-      >
-        <option value="client">Client</option>
-        <option value="site">Site</option>
-      </Select>
+      {accessRoles.length === 0 && !accessRolesLoading && (
+        <p className="text-xs text-amber-600">
+          No eligible portal roles are configured for this scope.
+        </p>
+      )}
       {form.scope_level === 'site' ? (
         <Select
           id="mob_user_site"

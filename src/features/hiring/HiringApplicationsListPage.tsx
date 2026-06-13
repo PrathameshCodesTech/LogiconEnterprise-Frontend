@@ -15,6 +15,7 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { hiringApplicationStatusLabel, HIRING_APPLICATION_STATUS_OPTIONS } from '@/features/talent/talentLabels'
+import { applicationRequiresClientReview } from '@/features/hiring/hiringLaneLabels'
 import type { HiringApplicationRow } from '@/features/hiring/types'
 
 function parseNum(v: string | null): number | undefined {
@@ -164,10 +165,10 @@ export function HiringApplicationsListPage() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" aria-hidden />
           <input
             type="search"
-            placeholder="Search candidate name or phone…"
+            placeholder="Search candidate name or phone..."
             value={search}
             onChange={(e) => setField('search', e.target.value)}
-            className="w-full rounded-panel border border-app-border bg-app-muted py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="w-full rounded-panel border border-app-border bg-app-surface py-2 pl-9 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -198,7 +199,7 @@ export function HiringApplicationsListPage() {
       </div>
 
       {error ? <ErrorState message={error} /> : null}
-      {loading ? <Spinner label="Loading applications…" /> : null}
+      {loading ? <Spinner label="Loading applications..." /> : null}
       {!loading && !error && rows.length === 0 ? (
         <EmptyState title="No applications" description="Try changing filters or add a candidate from hiring demands." />
       ) : null}
@@ -226,7 +227,12 @@ export function HiringApplicationsListPage() {
                   const busy = sendingId === a.id
                   const sent = sendSuccess[a.id] ?? false
                   const rowErr = sendErrors[a.id] ?? ''
-                  const canSend = canSendToClient && !a.client_visible && a.status !== 'rejected' && a.status !== 'cancelled'
+                  const canSend =
+                    canSendToClient &&
+                    applicationRequiresClientReview(a) &&
+                    !a.client_visible &&
+                    a.status !== 'rejected' &&
+                    a.status !== 'cancelled'
                   const hint = nextStepHint(a.status)
                   return (
                     <TR key={a.id}>
@@ -236,24 +242,24 @@ export function HiringApplicationsListPage() {
                       </TD>
                       <TD className="py-2 text-xs text-app-secondary">
                         {a.site_name ?? `Site #${a.site}`}
-                        {a.client_name ? ` · ${a.client_name}` : null}
+                        {a.client_name ? ` - ${a.client_name}` : null}
                       </TD>
                       <TD className="py-2 text-xs">{a.job_role_name ?? `Role #${a.job_role}`}</TD>
                       <TD className="py-2 font-mono text-xs">#{a.mrf}</TD>
-                      <TD className="py-2 text-xs">{a.current_stage_name ?? '—'}</TD>
+                      <TD className="py-2 text-xs">{a.current_stage_name ?? '-'}</TD>
                       <TD className="py-2">
                         <Badge variant="neutral" className="text-[11px]">{hiringApplicationStatusLabel(a.status)}</Badge>
                       </TD>
                       <TD className="py-2 text-xs">
-                        {a.client_visible ? <Badge variant="info" className="text-[11px]">Visible</Badge> : <span className="text-app-subtle">—</span>}
+                        {a.client_visible ? <Badge variant="info" className="text-[11px]">Visible</Badge> : <span className="text-app-subtle">-</span>}
                       </TD>
                       <TD className="py-2">
                         {a.client_decision ? (
                           <Badge variant={decisionVariant(a.client_decision)} className="text-[11px]">{a.client_decision}</Badge>
-                        ) : <span className="text-xs text-app-subtle">—</span>}
+                        ) : <span className="text-xs text-app-subtle">-</span>}
                       </TD>
                       <TD className="py-2">
-                        {a.offer_status ? <Badge variant="neutral" className="text-[11px]">{a.offer_status}</Badge> : <span className="text-xs text-app-subtle">—</span>}
+                        {a.offer_status ? <Badge variant="neutral" className="text-[11px]">{a.offer_status}</Badge> : <span className="text-xs text-app-subtle">-</span>}
                       </TD>
                       <TD className="py-2 text-right">
                         <div className="flex flex-col items-end gap-1">
@@ -267,7 +273,7 @@ export function HiringApplicationsListPage() {
                                 onClick={() => void handleSendToClient(a.id)}
                               >
                                 <SendHorizontal className="h-3 w-3" aria-hidden />
-                                {busy ? '…' : 'Client'}
+                                {busy ? '...' : 'Client'}
                               </Button>
                             ) : null}
                             {sent ? <Badge variant="success" className="text-[11px]">Sent</Badge> : null}
@@ -336,11 +342,11 @@ export function HiringApplicationsListPage() {
                     ) : null}
                   </div>
                   <p className="mt-1 text-xs text-app-secondary">
-                    {a.job_role_name} · {a.site_name}
+                    {a.job_role_name} - {a.site_name}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span className="text-app-subtle">Stage:</span> {a.current_stage_name ?? '—'}
-                    <span className="text-app-subtle">·</span>
+                    <span className="text-app-subtle">Stage:</span> {a.current_stage_name ?? '-'}
+                    <span className="text-app-subtle">-</span>
                     {hiringApplicationStatusLabel(a.status)}
                   </div>
                 </button>

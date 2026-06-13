@@ -1,4 +1,4 @@
-import type { HiringApplicationRow, InterviewFeedbackRow, InterviewRow } from '@/features/hiring/types'
+import type { HiringApplicationRow, InterviewAssignmentState, InterviewFeedbackRow, InterviewRow } from '@/features/hiring/types'
 
 export type StageActionKind =
   | 'send_to_client'
@@ -147,6 +147,44 @@ export function feedbackRecommendationTone(rec: InterviewFeedbackRow['recommenda
     case 'hold':
       return 'warning'
     case 'reject':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interview assignment helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function assignmentStateLabel(state: InterviewAssignmentState): string {
+  switch (state) {
+    case 'upcoming':
+      return 'Upcoming'
+    case 'pending_feedback':
+      return 'Feedback pending'
+    case 'completed':
+      return 'Completed'
+    case 'held':
+      return 'On hold'
+    case 'rejected':
+      return 'Rejected'
+    default:
+      return state
+  }
+}
+
+export function assignmentStateTone(state: InterviewAssignmentState): StageActionTone {
+  switch (state) {
+    case 'upcoming':
+      return 'info'
+    case 'pending_feedback':
+      return 'warning'
+    case 'completed':
+      return 'success'
+    case 'held':
+      return 'warning'
+    case 'rejected':
       return 'danger'
     default:
       return 'neutral'

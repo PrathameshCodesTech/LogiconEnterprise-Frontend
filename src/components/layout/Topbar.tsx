@@ -1,4 +1,4 @@
-﻿import { CalendarDays, LogOut, Menu } from 'lucide-react'
+import { CalendarDays, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { NotificationBell } from '@/features/notifications/NotificationBell'
@@ -60,14 +60,18 @@ function HeaderDatePlain({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className="flex items-center gap-2 tabular-nums"
+      className={cn(
+        'flex items-center gap-2 tabular-nums',
+        // Hide entire date section on very small screens to prevent overlap
+        compact && 'hidden min-[420px]:flex',
+      )}
       title={now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
     >
       <CalendarDays
         className={cn('shrink-0 text-app-subtle', compact ? 'h-3.5 w-3.5' : 'h-4 w-4')}
         aria-hidden
       />
-      <div className={cn('min-w-0 text-left leading-tight', compact && 'hidden min-[380px]:block')}>
+      <div className={cn('min-w-0 text-left leading-tight', compact && 'hidden min-[480px]:block')}>
         <span
           className={cn(
             'block font-medium tracking-tight text-app-secondary',
@@ -106,40 +110,27 @@ function HeaderActions({ onLogout, compact = false }: { onLogout: () => void; co
 }
 
 export function Topbar({
-  onMenuClick,
   onLogout,
 }: {
-  onMenuClick?: () => void
   onLogout: () => void
 }) {
   return (
     <>
       {/* Mobile — aligned with workingCampaignQRCode AdminLayout mobile header */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-app-border bg-app-surface px-4 shadow-panel md:hidden">
-        {onMenuClick ? (
-          <button
-            type="button"
-            onClick={onMenuClick}
-            className="rounded-panel p-2 hover:bg-app-muted"
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5 text-app-text" />
-          </button>
-        ) : null}
-        <div className="flex min-w-0 flex-1 items-center">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-app-border bg-app-surface px-3 shadow-panel sm:gap-3 sm:px-4 lg:hidden">
+        <div className="flex min-w-0 flex-1 items-center overflow-hidden">
           <BrandBlock compact />
         </div>
         <HeaderActions onLogout={onLogout} compact />
       </header>
 
       {/* Desktop — full-width brand + strapline (no breadcrumb) */}
-      <header className="hidden h-16 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-6 shadow-panel md:flex">
+      <header className="hidden h-16 shrink-0 items-center justify-between border-b border-app-border bg-app-surface px-6 shadow-panel lg:flex">
         <BrandBlock />
         <HeaderActions onLogout={onLogout} />
       </header>
     </>
   )
 }
-
 
 

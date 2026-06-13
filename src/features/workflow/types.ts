@@ -319,29 +319,37 @@ export type WorkflowTaskMobilisation = WorkflowTaskMobilisationSetup
 
 export interface WorkflowTaskSalesProposalBudgetLine {
   id: number
+  site?: number | null
+  site_id?: number | null
+  site_name?: string | null
+  role_requirement?: number | null
+  job_role?: number | null
+  job_role_id?: number | null
+  job_role_name?: string | null
   description?: string | null
   service_category?: string | null
-  job_role_name?: string | null
-  site_name?: string | null
   manpower_count?: number | null
   unit_cost?: string | null
   total_cost?: string | null
   is_manual_override?: boolean
   sort_order?: number
-  site_id?: number | null
-  job_role_id?: number | null
 }
 
 export interface WorkflowTaskSalesProposalBreakupLine {
   id: number
+  site?: number | null
+  site_id?: number | null
+  site_name?: string | null
+  role_requirement?: number | null
+  job_role?: number | null
+  job_role_id?: number | null
+  job_role_name?: string | null
   component_code?: string | null
   component_name?: string | null
   component_type?: string | null
   percentage?: string | null
   sort_order?: number
   amount?: string | null
-  site_id?: number | null
-  job_role_id?: number | null
 }
 
 export interface WorkflowTaskSalesProposalLead {

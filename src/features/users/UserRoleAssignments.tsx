@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Building2, Key, MapPin, Plus, Trash2 } from 'lucide-react'
 import { listRoles, listScopeNodes, listUserRoleAssignments, createUserRoleAssignment, deleteUserRoleAssignment, type AccessRole, type ScopeNode, type UserRoleAssignmentRow } from '@/api/access'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
@@ -22,6 +23,16 @@ function scopeTypeLabel(nodeType: string | undefined): string | null {
     cost_center: 'Cost center',
   }
   return map[nodeType] ?? nodeType
+}
+
+function scopeTypeVariant(nodeType: string | undefined): 'info' | 'success' | 'warning' | 'neutral' {
+  if (!nodeType) return 'neutral'
+  const map: Record<string, 'info' | 'success' | 'warning' | 'neutral'> = {
+    company: 'info',
+    client: 'success',
+    site: 'warning',
+  }
+  return map[nodeType] ?? 'neutral'
 }
 
 export function UserRoleAssignments({ userId }: { userId: number }) {
@@ -123,113 +134,168 @@ export function UserRoleAssignments({ userId }: { userId: number }) {
   }
 
   return (
-    <section className="rounded-panel border border-app-border bg-app-surface p-5 shadow-panel">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-app-text">Access assignments</h3>
-          <p className="mt-1 text-xs text-app-secondary">
-            A user receives access by getting a role at a specific company, client, or site.
-          </p>
+    <div className="space-y-4">
+      {/* Header Card */}
+      <div className="flex flex-col gap-4 rounded-xl border border-app-border bg-app-surface p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-100">
+            <Key className="h-5 w-5 text-brand-600" aria-hidden />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-app-text">Access Assignments</h3>
+            <p className="text-sm text-app-secondary">Role-based access at company, client, or site level</p>
+          </div>
         </div>
-        {canEdit ? <Badge variant="info">Editable</Badge> : <Badge variant="neutral">Read-only</Badge>}
+        {canEdit ? (
+          <Badge variant="info">Editable</Badge>
+        ) : (
+          <Badge variant="neutral">Read-only</Badge>
+        )}
       </div>
 
-      {loading ? (
-        <div className="mt-6 flex items-center justify-center">
-          <Spinner label="Loading access assignments" />
-        </div>
-      ) : error ? (
-        <div className="mt-4 space-y-3">
-          <ErrorState message={error} />
-          <Button variant="secondary" onClick={() => refresh()}>
-            Retry
-          </Button>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="mt-4">
-          <EmptyState title="No access assignments" description="Add a role at a company, client, or site to grant access." />
-        </div>
-      ) : (
-        <ul className="mt-4 space-y-2">
-          {rows.map((r) => {
-            const typeLbl = scopeTypeLabel(r.role_node_type_scope)
-            return (
-              <li key={r.id} className="flex flex-col gap-1 rounded-panel border border-app-border bg-app-muted p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-app-text">
-                      {r.role_name} <span className="text-app-subtle">({r.role_code})</span>
-                    </p>
-                    <p className="mt-1 truncate font-mono text-xs text-app-secondary">{r.scope_node_path}</p>
-                    {typeLbl ? <p className="mt-1 text-xs text-app-subtle">Level: {typeLbl}</p> : null}
+      {/* Assignments List */}
+      <div className="rounded-xl border border-app-border bg-app-surface shadow-sm">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Spinner label="Loading access assignments" />
+          </div>
+        ) : error ? (
+          <div className="p-5 space-y-3">
+            <ErrorState message={error} />
+            <Button variant="secondary" onClick={() => refresh()}>
+              Retry
+            </Button>
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="py-12">
+            <EmptyState
+              title="No access assignments"
+              description="Add a role at a company, client, or site to grant access."
+            />
+          </div>
+        ) : (
+          <ul className="divide-y divide-app-border">
+            {rows.map((r) => {
+              const typeLbl = scopeTypeLabel(r.role_node_type_scope)
+              return (
+                <li
+                  key={r.id}
+                  className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-app-muted/50"
+                >
+                  {/* Icon */}
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100">
+                    {r.role_node_type_scope === 'site' ? (
+                      <MapPin className="h-5 w-5 text-brand-600" aria-hidden />
+                    ) : (
+                      <Building2 className="h-5 w-5 text-brand-600" aria-hidden />
+                    )}
                   </div>
+
+                  {/* Content */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-app-text">{r.role_name}</span>
+                      <span className="rounded bg-app-muted px-1.5 py-0.5 font-mono text-[11px] text-app-subtle">
+                        {r.role_code}
+                      </span>
+                      {typeLbl ? (
+                        <Badge variant={scopeTypeVariant(r.role_node_type_scope)}>{typeLbl}</Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 truncate text-sm text-app-secondary">{r.scope_node_path}</p>
+                  </div>
+
+                  {/* Actions */}
                   {canEdit ? (
-                    <Button variant="danger" className="min-h-9 px-3" onClick={() => remove(r.id)}>
-                      Remove
-                    </Button>
+                    <div className="shrink-0 opacity-60 group-hover:opacity-100">
+                      <Button
+                        variant="ghost"
+                        className="min-h-9 px-3 text-status-danger hover:bg-status-danger/10"
+                        onClick={() => remove(r.id)}
+                        aria-label="Remove assignment"
+                        title="Remove"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </Button>
+                    </div>
                   ) : null}
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      <div className="mt-6 rounded-panel border border-app-border bg-app-muted p-4">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-app-text">Add access assignment</p>
-          {lookupsLoading ? <span className="text-xs text-app-subtle">Loading lookups...</span> : null}
-        </div>
-
-        {lookupError ? (
-          <div className="mt-3">
-            <ErrorState message={`Lookup API failed. Add is disabled. ${lookupError}`} />
-          </div>
-        ) : null}
-
-        {submitError ? (
-          <div className="mt-3">
-            <ErrorState message={submitError} />
-          </div>
-        ) : null}
-
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Select
-            id="role"
-            label="Role"
-            value={roleId === '' ? '' : String(roleId)}
-            onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : '')}
-            disabled={!canEdit || lookupsLoading || !!lookupError}
-          >
-            <option value="">Select role</option>
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name} ({role.code})
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="scope_node"
-            label="Company / Client / Site"
-            value={scopeNodeId === '' ? '' : String(scopeNodeId)}
-            onChange={(e) => setScopeNodeId(e.target.value ? Number(e.target.value) : '')}
-            disabled={!canEdit || lookupsLoading || !!lookupError}
-          >
-            <option value="">Select location</option>
-            {scopeNodes.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.path || `${s.name} (${s.node_type})`}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className="mt-3 flex justify-end">
-          <Button variant="primary" onClick={add} disabled={addDisabled}>
-            {submitting ? 'Adding...' : 'Add'}
-          </Button>
-        </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
-    </section>
+
+      {/* Add Assignment Card */}
+      {canEdit ? (
+        <div className="rounded-xl border border-app-border bg-app-surface p-5 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100">
+              <Plus className="h-4 w-4 text-brand-600" aria-hidden />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-app-text">Add Access Assignment</h4>
+              {lookupsLoading ? (
+                <span className="text-xs text-app-subtle">Loading options...</span>
+              ) : null}
+            </div>
+          </div>
+
+          {lookupError ? (
+            <div className="mb-4">
+              <ErrorState message={`Lookup API failed. Add is disabled. ${lookupError}`} />
+            </div>
+          ) : null}
+
+          {submitError ? (
+            <div className="mb-4">
+              <ErrorState message={submitError} />
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              id="role"
+              label="Role"
+              value={roleId === '' ? '' : String(roleId)}
+              onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : '')}
+              disabled={!canEdit || lookupsLoading || !!lookupError}
+            >
+              <option value="">Select role</option>
+              {roles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name} ({role.code})
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="scope_node"
+              label="Company / Client / Site"
+              value={scopeNodeId === '' ? '' : String(scopeNodeId)}
+              onChange={(e) => setScopeNodeId(e.target.value ? Number(e.target.value) : '')}
+              disabled={!canEdit || lookupsLoading || !!lookupError}
+            >
+              <option value="">Select location</option>
+              {scopeNodes.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.path || `${s.name} (${s.node_type})`}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <Button
+              onClick={add}
+              disabled={addDisabled}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              {submitting ? 'Adding...' : 'Add Assignment'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Code, Key, Layers, Shield } from 'lucide-react'
 import { listRolePermissions, type AccessRole, type RolePermission } from '@/api/access'
 import { parseApiError } from '@/lib/apiError'
 import { Badge } from '@/components/ui/Badge'
@@ -40,49 +41,88 @@ export function RoleCatalogDetail({ role }: { role: AccessRole }) {
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [rows])
 
-  if (loading) return <Spinner label="Loading role details..." />
+  if (loading) {
+    return (
+      <div className="flex h-full min-h-[300px] items-center justify-center p-6">
+        <Spinner label="Loading role details..." />
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Role details</p>
-        <h3 className="mt-1 text-lg font-semibold text-app-text">{role.name}</h3>
+    <div className="p-5">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-100">
+          <Shield className="h-6 w-6 text-brand-600" aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wider text-brand-600">Role Details</p>
+          <h3 className="mt-0.5 truncate text-lg font-semibold text-app-text">{role.name}</h3>
+        </div>
+        {role.is_active ? (
+          <Badge variant="success">Active</Badge>
+        ) : (
+          <Badge variant="neutral">Inactive</Badge>
+        )}
       </div>
 
-      <dl className="grid gap-3 text-sm">
-        <div className="flex justify-between gap-3">
-          <dt className="text-app-subtle">Code</dt>
-          <dd className="font-mono text-xs text-app-secondary">{role.code}</dd>
+      {/* Info Grid */}
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <div className="rounded-lg border border-app-border bg-app-surface px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Code className="h-4 w-4 text-app-subtle" aria-hidden />
+            <span className="text-xs text-app-subtle">Code</span>
+          </div>
+          <p className="mt-1 truncate font-mono text-sm font-medium text-app-text">{role.code}</p>
         </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-app-subtle">Assignable level</dt>
-          <dd className="text-right font-medium text-app-text">{formatAssignableLevel(role.node_type_scope)}</dd>
+        <div className="rounded-lg border border-app-border bg-app-surface px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-app-subtle" aria-hidden />
+            <span className="text-xs text-app-subtle">Assignable Level</span>
+          </div>
+          <p className="mt-1 truncate text-sm font-medium text-app-text">
+            {formatAssignableLevel(role.node_type_scope)}
+          </p>
         </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-app-subtle">Status</dt>
-          <dd>{role.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="neutral">Inactive</Badge>}</dd>
+        <div className="col-span-2 rounded-lg border border-app-border bg-app-surface px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Key className="h-4 w-4 text-app-subtle" aria-hidden />
+            <span className="text-xs text-app-subtle">Total Permissions</span>
+          </div>
+          <p className="mt-1 text-2xl font-bold text-brand-600">{rows.length}</p>
         </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-app-subtle">Permissions</dt>
-          <dd className="font-medium text-app-text">{rows.length}</dd>
-        </div>
-      </dl>
+      </div>
 
-      <p className="text-xs text-app-subtle">Permissions are managed by system administrators.</p>
+      <p className="mt-4 text-xs text-app-subtle">
+        Permissions are managed by system administrators.
+      </p>
 
-      {error ? <ErrorState message={error} /> : null}
+      {error ? (
+        <div className="mt-4">
+          <ErrorState message={error} />
+        </div>
+      ) : null}
 
+      {/* Permissions by Area */}
       {!error && countsByArea.length > 0 ? (
-        <div className="rounded-panel border border-app-border bg-app-muted p-3">
-          <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">By area</p>
-          <ul className="mt-2 space-y-1 text-sm text-app-secondary">
+        <div className="mt-4">
+          <p className="mb-3 text-xs font-medium uppercase tracking-wider text-app-secondary">
+            Permissions by Area
+          </p>
+          <div className="space-y-2">
             {countsByArea.map(([resource, n]) => (
-              <li key={resource} className="flex justify-between gap-2">
-                <span>{permissionAreaLabel(resource)}</span>
-                <span className="font-mono text-xs text-app-text">{n}</span>
-              </li>
+              <div
+                key={resource}
+                className="flex items-center justify-between rounded-lg border border-app-border bg-app-surface px-4 py-2.5"
+              >
+                <span className="text-sm text-app-text">{permissionAreaLabel(resource)}</span>
+                <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-700">
+                  {n}
+                </span>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       ) : null}
     </div>

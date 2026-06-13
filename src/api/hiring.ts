@@ -13,6 +13,8 @@ import type {
   HiringDeploymentConversionResult,
   HiringDemandRow,
   ApplyInterviewPlanResult,
+  InterviewAssignmentState,
+  InterviewAssignmentsResponse,
   InterviewCreateInput,
   InterviewFeedbackCreateInput,
   InterviewFeedbackRow,
@@ -34,6 +36,9 @@ export interface ListHiringDemandsParams {
   mrf?: number
   job_role?: number
   page?: number
+  // Lane filters
+  billing_type?: 'billable' | 'non_billable'
+  hiring_lane?: 'client_billable' | 'internal_non_billable'
 }
 
 export async function listHiringDemands(params?: ListHiringDemandsParams): Promise<{ items: HiringDemandRow[]; count?: number }> {
@@ -363,4 +368,23 @@ export async function listClientReviewApplications(
     },
   })
   return unwrapDrfResults<ClientReviewApplicationRow>(res.data)
+}
+
+// Interview assignments
+
+export interface ListInterviewAssignmentsParams {
+  mine?: boolean
+  assignment_state?: 'all' | InterviewAssignmentState
+}
+
+export async function listInterviewAssignments(
+  params?: ListInterviewAssignmentsParams,
+): Promise<InterviewAssignmentsResponse> {
+  const res = await api.get('/api/hiring/interviews/assignments/', {
+    params: {
+      ...params,
+      mine: typeof params?.mine === 'boolean' ? String(params.mine) : undefined,
+    },
+  })
+  return res.data as InterviewAssignmentsResponse
 }

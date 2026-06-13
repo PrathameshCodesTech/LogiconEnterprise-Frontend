@@ -1,5 +1,24 @@
 import type { HiringApplicationRow } from '@/features/hiring/types'
 
+export type DocumentTypeCode = 'pdf' | 'docx' | 'doc' | 'txt' | 'xlsx' | 'csv' | 'unknown'
+
+/** Backend-computed profile completeness (do not recompute on frontend). */
+export interface ProfileQualityChecks {
+  phone_present?: boolean
+  mapped_role_present?: boolean
+  resume_file_present?: boolean
+  skills_present?: boolean
+  experience_present?: boolean
+  education_present?: boolean
+  location_present?: boolean
+}
+
+export interface ProfileQuality {
+  score: number
+  checks: ProfileQualityChecks
+  missing: string[]
+}
+
 /** GET /api/talent/candidates/ */
 export interface CandidateRow {
   id: number
@@ -26,13 +45,31 @@ export interface CandidateRow {
   current_role?: string | null
   source_reference?: string | null
   is_duplicate?: boolean
+  duplicate_of?: number | null
   do_not_contact?: boolean
+  profile_quality?: ProfileQuality | null
+  profile_quality_score?: number | null
   skills_count?: number
   resume_count?: number
   latest_resume_status?: string | null
+  latest_document_type?: DocumentTypeCode | null
+  latest_source_type?: string | null
   active_application_count?: number
+  target_job_role?: number | null
+  target_job_role_name?: string | null
+  target_job_role_code?: string | null
   created_at?: string
   updated_at?: string
+  // Candidate journey fields (computed by backend)
+  journey_status?: string | null
+  journey_status_label?: string | null
+  latest_application_id?: number | null
+  latest_application_status?: string | null
+  latest_offer_status?: string | null
+  employee_id?: number | null
+  employee_status?: string | null
+  deployment_id?: number | null
+  deployment_status?: string | null
 }
 
 export interface CandidateWriteInput {
@@ -58,6 +95,8 @@ export interface CandidateWriteInput {
 export interface ResumeRow {
   id: number
   candidate: number
+  candidate_full_name?: string | null
+  candidate_phone?: string | null
   file?: string
   original_filename?: string
   content_type?: string
@@ -68,9 +107,73 @@ export interface ResumeRow {
   status?: string
   file_hash?: string
   source_type?: string
+  document_type?: DocumentTypeCode | string | null
+  target_job_role?: number | null
+  target_job_role_name?: string | null
+  target_job_role_code?: string | null
+  target_role_source?: string | null
+  import_batch_id?: string | null
   error_message?: string
   manual_review_reason?: string
   uploaded_by?: number | null
+}
+
+/** One file row in an async resume import batch. */
+export interface ResumeImportItem {
+  id: number
+  original_filename?: string | null
+  document_type?: DocumentTypeCode | string | null
+  row_number?: number | null
+  status: string
+  error_message?: string | null
+  candidate?: number | null
+  candidate_name?: string | null
+  candidate_phone?: string | null
+  resume?: number | null
+  processed_at?: string | null
+}
+
+/** Async bulk resume upload batch (POST bulk-upload + GET import-batches/{id}/). */
+export interface ResumeImportBatch {
+  id: number
+  target_job_role?: number | null
+  target_job_role_name?: string | null
+  source_type?: string | null
+  document_type?: DocumentTypeCode | string | null
+  import_file?: string | null
+  original_filename?: string | null
+  created_by?: number | null
+  created_at?: string
+  status: string
+  total_count: number
+  processed_count: number
+  success_count: number
+  duplicate_count: number
+  failed_count: number
+  manual_review_count: number
+  items: ResumeImportItem[]
+}
+
+/** One row in an Excel/CSV candidate import response. */
+export interface ExcelImportItem {
+  status: string
+  row?: number | null
+  row_number?: number | null
+  candidate?: number | null
+  candidate_id?: number | null
+  candidate_full_name?: string | null
+  target_job_role?: number | null
+  phone?: string | null
+  error?: string | null
+}
+
+/** POST /api/talent/resumes/excel-import/ */
+export interface ExcelImportResponse {
+  batch_id?: string | null
+  imported: number
+  duplicates?: number
+  failed: number
+  items: ExcelImportItem[]
 }
 
 export interface ManualResumeIntakeInput {
@@ -124,7 +227,7 @@ export interface CandidateExperienceRow {
   is_current?: boolean
   duration_months?: number | null
   description?: string
-  responsibilities?: string
+  responsibilities?: string[] | string | null
   confidence?: string | number | null
   created_at?: string
   updated_at?: string
@@ -181,6 +284,7 @@ export interface ResumeReviewQueueItem {
   id: number
   original_filename?: string | null
   status?: string
+  document_type?: DocumentTypeCode | string | null
   manual_review_reason?: string | null
   error_message?: string | null
   parser_engine?: string | null
@@ -274,6 +378,18 @@ export interface DuplicateResolutionPayload {
   resolution: 'link_existing' | 'keep_separate' | 'mark_duplicate'
   candidate?: number | null
   note?: string
+}
+
+/** POST /api/talent/candidates/{id}/merge/ */
+export interface CandidateMergeInput {
+  target_candidate: number
+  note?: string
+}
+
+export interface CandidateMergeResult {
+  source_candidate: CandidateRow
+  target_candidate: CandidateRow
+  profile_quality: ProfileQuality
 }
 
 /** Returned by apply-review, resolve-duplicate, mark-reviewed audit endpoints */

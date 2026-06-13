@@ -32,12 +32,13 @@ import { BudgetPlansPage } from '@/features/budgets/BudgetPlansPage'
 import { ClientBudgetCommercialsPage } from '@/features/budgets/ClientBudgetCommercialsPage'
 import { CandidatesListPage } from '@/features/talent/CandidatesListPage'
 import { CandidateDetailPage } from '@/features/talent/CandidateDetailPage'
-import { ResumeReviewPage } from '@/features/talent/ResumeReviewPage'
+import { ResumeReviewQueuePage } from '@/features/talent/ResumeReviewQueuePage'
 import { HiringDemandsPage } from '@/features/hiring/HiringDemandsPage'
 import { HiringDemandDetailPage } from '@/features/hiring/HiringDemandDetailPage'
 import { HiringApplicationsListPage } from '@/features/hiring/HiringApplicationsListPage'
 import { HiringApplicationDetailPage } from '@/features/hiring/HiringApplicationDetailPage'
 import { InterviewPipelinePage } from '@/features/hiring/InterviewPipelinePage'
+import { InterviewAssignmentsPage } from '@/features/hiring/InterviewAssignmentsPage'
 import { ClientReviewPage } from '@/features/hiring/ClientReviewPage'
 import { OffersPage } from '@/features/hiring/OffersPage'
 import { EmployeesPage } from '@/features/deployment/EmployeesPage'
@@ -360,6 +361,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'candidates/review-queue',
+            element: (
+              <RequireCapability anyOf={[CAP.RESUME_READ, CAP.RESUME_VIEW]}>
+                <ResumeReviewQueuePage />
+              </RequireCapability>
+            ),
+          },
+          {
             path: 'candidates/:id',
             element: (
               <RequireCapability anyOf={[CAP.CANDIDATE_READ]}>
@@ -375,6 +384,14 @@ export const router = createBrowserRouter([
                   <InterviewPipelinePage />
                 </RequireCapability>
               </RequireInternal>
+            ),
+          },
+          {
+            path: 'hiring/interview-assignments',
+            element: (
+              <RequireCapability anyOf={[CAP.INTERVIEW_READ]}>
+                <InterviewAssignmentsPage />
+              </RequireCapability>
             ),
           },
           {
@@ -469,11 +486,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'talent/resume-review',
-            element: (
-              <RequireCapability anyOf={[CAP.RESUME_READ, CAP.RESUME_VIEW]}>
-                <ResumeReviewPage />
-              </RequireCapability>
-            ),
+            element: <Navigate to="/candidates/review-queue" replace />,
           },
           {
             path: 'hiring/client-review',

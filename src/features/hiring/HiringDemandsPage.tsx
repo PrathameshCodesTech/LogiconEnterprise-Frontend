@@ -3,16 +3,27 @@ import { ExternalLink, Search, UserPlus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAllCapabilities } from '@/lib/capabilities'
-import { listHiringDemands } from '@/api/hiring'
+import { listHiringDemands, type ListHiringDemandsParams } from '@/api/hiring'
 import { parseApiError } from '@/lib/apiError'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
+import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { ManualResumeIntakeDrawer } from '@/features/talent/ManualResumeIntakeDrawer'
 import { ResumePoolDrawer } from '@/features/hiring/ResumePoolDrawer'
+import {
+  hiringLaneBadgeLabel,
+  hiringLaneBadgeVariant,
+  isInternalNonBillable,
+  hasLaneInfo,
+} from '@/features/hiring/hiringLaneLabels'
 import type { HiringDemandRow } from '@/features/hiring/types'
+
+type BillingTypeFilter = '' | 'billable' | 'non_billable'
+type HiringLaneFilter = '' | 'client_billable' | 'internal_non_billable'
 
 export function HiringDemandsPage() {
   const meCaps = useAuthStore((s) => s.me?.capabilities ?? [])
@@ -27,10 +38,17 @@ export function HiringDemandsPage() {
   const [selectedDemand, setSelectedDemand] = useState<HiringDemandRow | null>(null)
   const [prefill, setPrefill] = useState<{ mrfId: number; lineId: number } | null>(null)
 
+  // Filters
+  const [billingTypeFilter, setBillingTypeFilter] = useState<BillingTypeFilter>('')
+  const [hiringLaneFilter, setHiringLaneFilter] = useState<HiringLaneFilter>('')
+
   const refreshDemands = useCallback(async () => {
-    const res = await listHiringDemands({ page: 1 })
+    const params: ListHiringDemandsParams = { page: 1 }
+    if (billingTypeFilter) params.billing_type = billingTypeFilter
+    if (hiringLaneFilter) params.hiring_lane = hiringLaneFilter
+    const res = await listHiringDemands(params)
     setRows(res.items)
-  }, [])
+  }, [billingTypeFilter, hiringLaneFilter])
 
   useEffect(() => {
     let cancelled = false
@@ -38,7 +56,10 @@ export function HiringDemandsPage() {
       setLoading(true)
       setError(null)
       try {
-        const res = await listHiringDemands({ page: 1 })
+        const params: ListHiringDemandsParams = { page: 1 }
+        if (billingTypeFilter) params.billing_type = billingTypeFilter
+        if (hiringLaneFilter) params.hiring_lane = hiringLaneFilter
+        const res = await listHiringDemands(params)
         if (!cancelled) setRows(res.items)
       } catch (e: unknown) {
         if (!cancelled) setError(parseApiError(e, 'Could not load hiring demands').message)
@@ -49,7 +70,7 @@ export function HiringDemandsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [billingTypeFilter, hiringLaneFilter])
 
   function openIntake(d: HiringDemandRow) {
     setPrefill({ mrfId: d.mrf_id, lineId: d.id })
@@ -80,6 +101,32 @@ export function HiringDemandsPage() {
         </p>
       </div>
 
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Select
+          id="hd_billing_type"
+          label="Billing type"
+          value={billingTypeFilter}
+          onChange={(e) => setBillingTypeFilter(e.target.value as BillingTypeFilter)}
+          className="min-w-[140px]"
+        >
+          <option value="">All billing types</option>
+          <option value="billable">Billable</option>
+          <option value="non_billable">Non-billable</option>
+        </Select>
+        <Select
+          id="hd_hiring_lane"
+          label="Hiring lane"
+          value={hiringLaneFilter}
+          onChange={(e) => setHiringLaneFilter(e.target.value as HiringLaneFilter)}
+          className="min-w-[180px]"
+        >
+          <option value="">All hiring lanes</option>
+          <option value="client_billable">Client Billable</option>
+          <option value="internal_non_billable">Internal Non-billable</option>
+        </Select>
+      </div>
+
       {error ? <ErrorState message={error} /> : null}
       {loading ? <Spinner label="Loading hiring demands..." /> : null}
       {!loading && !error && rows.length === 0 ? (
@@ -92,22 +139,48 @@ export function HiringDemandsPage() {
             <THead>
               <TR>
                 <TH className="py-2">Client / site</TH>
+                <TH className="py-2">Lane</TH>
                 <TH className="py-2">Job role</TH>
                 <TH className="py-2">Requested</TH>
                 <TH className="py-2">Shortlisted</TH>
-                <TH className="py-2">Client approved</TH>
+                <TH className="py-2">Selected</TH>
                 <TH className="py-2">Offer accepted</TH>
                 <TH className="py-2">Open</TH>
                 <TH className="py-2 text-right"> </TH>
               </TR>
             </THead>
             <TBody>
-              {rows.map((d) => (
+              {rows.map((d) => {
+                const isInternal = isInternalNonBillable(d)
+                return (
                 <TR key={d.id}>
                   <TD className="py-2">
-                    <p className="text-sm font-medium text-app-text">{d.client_name?.trim() || 'Client'}</p>
-                    <p className="text-xs text-app-secondary">{d.site_name?.trim() || '—'}</p>
-                    <p className="font-mono text-[11px] text-app-subtle">Request #{d.mrf_id}</p>
+                    {isInternal ? (
+                      <>
+                        <p className="text-sm font-medium text-app-text">
+                          {d.required_department_name?.trim() || 'Internal'}
+                        </p>
+                        {d.resolved_budget_plan_name ? (
+                          <p className="text-xs text-app-secondary">{d.resolved_budget_plan_name}</p>
+                        ) : null}
+                        <p className="font-mono text-[11px] text-app-subtle">Request #{d.mrf_id}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium text-app-text">{d.client_name?.trim() || 'Client'}</p>
+                        <p className="text-xs text-app-secondary">{d.site_name?.trim() || '-'}</p>
+                        <p className="font-mono text-[11px] text-app-subtle">Request #{d.mrf_id}</p>
+                      </>
+                    )}
+                  </TD>
+                  <TD className="py-2">
+                    {hasLaneInfo(d) ? (
+                      <Badge variant={hiringLaneBadgeVariant(d)} className="text-[10px]">
+                        {hiringLaneBadgeLabel(d)}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-app-subtle">-</span>
+                    )}
                   </TD>
                   <TD className="py-2 text-sm">{d.job_role_name ?? `Role #${d.job_role_id}`}</TD>
                   <TD className="py-2 text-xs">{d.requested_headcount}</TD>
@@ -139,7 +212,8 @@ export function HiringDemandsPage() {
                     </div>
                   </TD>
                 </TR>
-              ))}
+              )
+              })}
             </TBody>
           </Table>
         </div>

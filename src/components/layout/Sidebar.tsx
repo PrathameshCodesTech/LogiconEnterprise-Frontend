@@ -1,4 +1,4 @@
-﻿import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/features/auth/authStore'
 import { buildNavGroups } from '@/components/layout/navConfig'
 import { cn } from '@/lib/cn'
@@ -38,9 +38,30 @@ function NavBadge({ count }: { count: number }) {
   )
 }
 
+/**
+ * Custom active state checker for paths with special sibling route handling.
+ * - /candidates should be active on /candidates and /candidates/:id (numeric)
+ *   but NOT on /candidates/review-queue
+ */
+function isNavItemActive(itemPath: string, currentPath: string): boolean | undefined {
+  // Special handling for /candidates - don't match review-queue
+  if (itemPath === '/candidates') {
+    if (currentPath === '/candidates') return true
+    if (currentPath.startsWith('/candidates/')) {
+      const rest = currentPath.slice('/candidates/'.length)
+      // Only match if it's a numeric ID (detail page), not another nested route
+      return /^\d+$/.test(rest)
+    }
+    return false
+  }
+  // Return undefined to let NavLink use default matching
+  return undefined
+}
+
 export function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   const me = useAuthStore((s) => s.me)
   const unreadByArea = useNotificationStore((s) => s.unreadByArea)
+  const location = useLocation()
 
   const visibleGroups = buildNavGroups(me)
 
@@ -54,24 +75,34 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
       <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 pt-4" aria-label="Main">
         {visibleGroups.map((group) => (
           <div key={group.label}>
-            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-nav-label">{group.label}</p>
+            <div className="mb-2 flex items-center gap-2 px-3">
+              <span className="h-4 w-0.5 animate-pulse rounded-full bg-brand-500" aria-hidden />
+              <p className="text-[11px] font-bold uppercase tracking-wider text-nav-label/90">{group.label}</p>
+            </div>
             <div className="flex flex-col gap-0.5">
               {group.items.map((item) => {
                 const unreadCount = getUnreadCountForPath(item.path, unreadByArea)
+                const customActive = isNavItemActive(item.path, location.pathname)
                 return (
                   <NavLink
                     key={item.path}
                     to={item.path}
                     onClick={onNavigate}
-                    className={({ isActive }) => shellNavLinkClassName(isActive)}
+                    className={({ isActive }) => {
+                      const active = customActive !== undefined ? customActive : isActive
+                      return shellNavLinkClassName(active)
+                    }}
                   >
-                    {({ isActive }) => (
-                      <>
-                        <item.icon className={shellNavIconClassName(isActive)} aria-hidden />
-                        <span className="truncate">{item.label}</span>
-                        <NavBadge count={unreadCount} />
-                      </>
-                    )}
+                    {({ isActive }) => {
+                      const active = customActive !== undefined ? customActive : isActive
+                      return (
+                        <>
+                          <item.icon className={shellNavIconClassName(active)} aria-hidden />
+                          <span className="truncate">{item.label}</span>
+                          <NavBadge count={unreadCount} />
+                        </>
+                      )
+                    }}
                   </NavLink>
                 )
               })}

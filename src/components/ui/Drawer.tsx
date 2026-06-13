@@ -13,7 +13,7 @@ export function Drawer({
   panelClassName,
 }: {
   open: boolean
-  title: string
+  title: ReactNode
   description?: string
   onClose: () => void
   children: ReactNode
@@ -25,8 +25,10 @@ export function Drawer({
     return null
   }
 
+  const ariaLabel = typeof title === 'string' ? title : 'Dialog'
+
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={ariaLabel}>
       <button type="button" className="absolute inset-0 bg-app-text/40 backdrop-blur-[2px]" onClick={onClose} aria-label="Close" />
       <aside
         className={cn(

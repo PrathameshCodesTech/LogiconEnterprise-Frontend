@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
+  ArrowLeft,
+  Briefcase,
+  Building2,
+  CheckCircle2,
+  Clock,
+  FileText,
+  History,
+  IndianRupee,
+  MapPin,
+  Send,
+  Settings,
+  Target,
+  User,
+  Users,
+} from 'lucide-react'
+import {
   convertApplicationToDeployment,
   getHiringApplication,
   getInterviewPlan,
-  listCandidateMatchResults,
   listInterviewFeedback,
   listInterviews,
   listOffers,
@@ -15,6 +30,7 @@ import { listResumes } from '@/api/talent'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
+import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
@@ -23,17 +39,25 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { CandidateMatchScorecard } from '@/features/hiring/CandidateMatchScorecard'
 import { OfferFormDrawer } from '@/features/hiring/OfferFormDrawer'
 import { HiringApplicationJourney } from '@/features/hiring/HiringJourney'
+import { matchSnapshotToScorecard } from '@/features/hiring/matchResultMapper'
+import {
+  applicationRequiresClientReview,
+  hasLaneInfo,
+  hiringLaneBadgeLabel,
+  hiringLaneBadgeVariant,
+} from '@/features/hiring/hiringLaneLabels'
 import { InterviewPanel } from '@/features/hiring/InterviewPanel'
 import { ResumeFileActions } from '@/features/talent/ResumeFileActions'
 import {
   hiringApplicationStatusLabel,
   HIRING_APPLICATION_STATUS_OPTIONS,
   resumeStatusLabel,
+  resumeStatusVariant,
 } from '@/features/talent/talentLabels'
 import type {
-  CandidateMatchResultRow,
   HiringApplicationRow,
   HiringDeploymentConversionResult,
   InterviewFeedbackRow,
@@ -53,6 +77,65 @@ function offerStatusVariant(s: string): 'neutral' | 'info' | 'success' | 'danger
   if (s === 'withdrawn') return 'attention'
   if (s === 'expired') return 'warning'
   return 'neutral'
+}
+
+function statusVariant(s: string): 'neutral' | 'info' | 'success' | 'danger' | 'warning' {
+  if (['deployed', 'offer_accepted', 'selected'].includes(s)) return 'success'
+  if (['rejected', 'cancelled', 'offer_declined'].includes(s)) return 'danger'
+  if (['interview_scheduled', 'interview_in_progress', 'client_review'].includes(s)) return 'info'
+  if (['shortlisted', 'offer_released'].includes(s)) return 'warning'
+  return 'neutral'
+}
+
+function getInitials(name: string): string {
+  const parts = name.split(' ').filter(Boolean)
+  if (parts.length >= 2) {
+    return ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase()
+  }
+  return name.slice(0, 2).toUpperCase() || '??'
+}
+
+function SectionCard({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  icon: React.ReactNode
+  iconBg: string
+  title: string
+  subtitle?: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-app-border bg-app-surface shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-app-border px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl', iconBg)}>
+            {icon}
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-app-heading">{title}</h2>
+            {subtitle && <p className="text-xs text-app-subtle">{subtitle}</p>}
+          </div>
+        </div>
+        {action}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  )
+}
+
+function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2">
+      <span className="text-sm text-app-subtle">{label}</span>
+      <span className={cn('text-sm font-medium text-app-text', mono && 'font-mono text-xs')}>{value ?? '—'}</span>
+    </div>
+  )
 }
 
 export function HiringApplicationDetailPage() {
@@ -76,7 +159,6 @@ export function HiringApplicationDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [row, setRow] = useState<HiringApplicationRow | null>(null)
   const [stages, setStages] = useState<PipelineStageRow[]>([])
-  const [matches, setMatches] = useState<CandidateMatchResultRow[]>([])
   const [resumes, setResumes] = useState<ResumeRow[]>([])
   const [offer, setOffer] = useState<OfferRow | null>(null)
   const [interviews, setInterviews] = useState<InterviewRow[]>([])
@@ -106,12 +188,6 @@ export function HiringApplicationDetailPage() {
     const [st, rs] = await Promise.all([listPipelineStages({}), listResumes({ candidate: app.candidate })])
     setStages(st.items.sort((a, b) => a.order - b.order))
     setResumes(rs.items)
-    try {
-      const mt = await listCandidateMatchResults({ candidate: app.candidate, mrf_line_item: app.mrf_line_item })
-      setMatches(mt.items)
-    } catch {
-      setMatches([])
-    }
     try {
       const offerRes = await listOffers({ hiring_application: appId })
       const matched = offerRes.items[0] ?? null
@@ -229,246 +305,360 @@ export function HiringApplicationDetailPage() {
   if (error) return <ErrorState message={error} />
   if (!row) return <EmptyState title="Application not found" description="It may have been removed." />
 
-  const topMatch = matches[0]
+  const snapshotScorecard = row
+    ? matchSnapshotToScorecard(row.match_snapshot, row.candidate_name, row.candidate_phone)
+    : null
 
-  const clientApproved =
-    row.client_decision === 'approved' ||
-    ['selected', 'offer_released', 'offer_accepted', 'offer_declined', 'deployed'].includes(row.status)
+  // Lane-aware offer gate logic
+  const needsClientReview = applicationRequiresClientReview(row)
+  const clientApproved = row.client_decision === 'approved'
+  const internalCleared = row.status === 'selected'
+  // For billable: requires client approval; For non-billable: requires internal selection
+  const readyForOffer = needsClientReview
+    ? clientApproved || ['selected', 'offer_released', 'offer_accepted', 'offer_declined', 'deployed'].includes(row.status)
+    : internalCleared || ['offer_released', 'offer_accepted', 'offer_declined', 'deployed'].includes(row.status)
+
+  const candidateName = row.candidate_name ?? `Candidate #${row.candidate}`
+  const initials = getInitials(candidateName)
 
   return (
     <div className="w-full space-y-6">
-      <div className="flex flex-col gap-2 border-b border-app-border pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-app-subtle">Applications</p>
-          <h2 className="text-xl font-semibold tracking-tight text-app-text">{row.candidate_name ?? `Candidate #${row.candidate}`}</h2>
-          <p className="mt-1 text-sm text-app-secondary">
-            {row.job_role_name} · {row.site_name}
-            {row.client_name ? ` · ${row.client_name}` : null}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Badge variant="neutral">{row.current_stage_name ?? 'Pipeline stage'}</Badge>
-            <Badge variant="neutral">{hiringApplicationStatusLabel(row.status)}</Badge>
+      {/* Back navigation */}
+      <Link
+        to="/hiring/applications"
+        className="inline-flex items-center gap-2 text-sm font-medium text-app-secondary transition-colors hover:text-brand-600"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Applications
+      </Link>
+
+      {/* Hero Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-4">
+          {/* Avatar */}
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-600 text-lg font-semibold text-white">
+            {initials}
+          </div>
+
+          {/* Info */}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-semibold text-app-heading">{candidateName}</h1>
+              <Badge variant={statusVariant(row.status)}>
+                {hiringApplicationStatusLabel(row.status)}
+              </Badge>
+              {hasLaneInfo(row) ? (
+                <Badge variant={hiringLaneBadgeVariant(row)} className="text-[10px]">
+                  {hiringLaneBadgeLabel(row)}
+                </Badge>
+              ) : null}
+            </div>
+
+            <p className="mt-1 text-sm text-app-secondary">{row.job_role_name}</p>
+
+            {/* Location info */}
+            <div className="mt-2 flex flex-wrap gap-3 text-sm text-app-secondary">
+              <span className="inline-flex items-center gap-1">
+                <Building2 className="h-3.5 w-3.5" />
+                {row.client_name || 'Client'}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="h-3.5 w-3.5" />
+                {row.site_name || 'Site'}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Briefcase className="h-3.5 w-3.5" />
+                {row.current_stage_name || 'Pipeline Stage'}
+              </span>
+            </div>
+
+            {/* Tags */}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge variant="neutral">MRF #{row.mrf}</Badge>
+              {row.candidate_phone && <Badge variant="neutral">{row.candidate_phone}</Badge>}
+            </div>
           </div>
         </div>
+
+        {/* Quick link */}
         <Link
-          to="/hiring/applications"
-          className="inline-flex min-h-9 items-center justify-center rounded-panel border border-app-border bg-app-surface px-4 py-2 text-sm font-medium text-app-text hover:bg-app-muted"
+          to={`/candidates/${row.candidate}`}
+          className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg border border-app-border bg-app-surface px-3 text-sm font-medium text-app-text transition-colors hover:bg-app-muted"
         >
-          Back to list
+          <User className="h-4 w-4" />
+          View Profile
         </Link>
       </div>
 
+      {/* Journey */}
       <HiringApplicationJourney app={row} />
 
-      <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-        <p className="text-sm font-semibold text-app-text">Demand</p>
-        <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-          <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">Client</dt>
-            <dd className="text-app-text">{row.client_name?.trim() || '—'}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">Site</dt>
-            <dd className="text-app-text">{row.site_name?.trim() || '—'}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">Job role</dt>
-            <dd className="text-app-text">{row.job_role_name?.trim() || '—'}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-app-subtle">Request</dt>
-            <dd className="font-mono text-xs text-app-subtle">#{row.mrf}</dd>
-          </div>
-        </dl>
-      </section>
-
-      {topMatch ? (
-        <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-          <p className="text-sm font-semibold text-app-text">Match score</p>
-          <p className="mt-2 text-sm text-app-secondary">
-            Overall:{' '}
-            <span className="font-semibold text-app-text">
-              {topMatch.final_score != null ? String(topMatch.final_score) : topMatch.match_score != null ? String(topMatch.match_score) : '—'}
-            </span>
-            {topMatch.match_reason ? <span className="mt-1 block text-xs">{topMatch.match_reason}</span> : null}
-          </p>
-        </section>
-      ) : null}
-
-      <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-        <p className="text-sm font-semibold text-app-text">Resume status</p>
-        {resumes.length === 0 ? (
-          <p className="mt-2 text-sm text-app-secondary">No resumes on file for this candidate.</p>
-        ) : (
-          <ul className="mt-2 space-y-2 text-sm">
-            {resumes.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-start justify-between gap-3 rounded-panel border border-app-border bg-app-muted px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-app-text">{r.original_filename || `Resume #${r.id}`}</p>
-                  <Badge variant="neutral" className="mt-1">
-                    {resumeStatusLabel(r.status)}
-                  </Badge>
-                </div>
-                <ResumeFileActions resume={r} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-        <p className="text-sm font-semibold text-app-text">Stage history</p>
-        {(row.recent_stage_history ?? []).length === 0 ? (
-          <p className="mt-2 text-sm text-app-secondary">No history yet.</p>
-        ) : (
-          <ul className="mt-3 space-y-2 text-sm">
-            {(row.recent_stage_history ?? []).map((h) => (
-              <li key={h.id} className="rounded-panel border border-app-border bg-app-muted px-3 py-2 text-xs text-app-secondary">
-                <span className="font-medium text-app-text">
-                  {h.from_stage_name ?? 'Start'} → {h.to_stage_name ?? '—'}
-                </span>
-                <span className="mx-2">·</span>
-                {hiringApplicationStatusLabel(h.to_status)}
-                {h.moved_by_username ? (
-                  <span className="mt-1 block text-app-subtle">By {h.moved_by_username}</span>
-                ) : null}
-                {h.comment ? <span className="mt-1 block italic">{h.comment}</span> : null}
-                {h.created_at ? <span className="mt-1 block">{new Date(h.created_at).toLocaleString()}</span> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {canInterviewRead ? (
-        <InterviewPanel
-          app={row}
-          plan={interviewPlan}
-          interviews={interviews}
-          feedbacks={feedbacks}
-          loading={interviewsLoading}
-          canCreate={canInterviewCreate}
-          canManage={canInterviewManage}
-          onChanged={async () => {
-            await loadApplication()
-            await loadInterviews()
-          }}
-        />
-      ) : null}
-
-      {canOfferRead ? (
-        <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-app-text">Offer</p>
-            {offer || row.status === 'selected' ? (
-              <Button
-                type="button"
-                variant="secondary"
-                className="min-h-7 px-3 text-xs"
-                onClick={() => setOfferDrawerOpen(true)}
-              >
-                {offer ? 'Manage offer' : 'Create offer'}
-              </Button>
-            ) : null}
-          </div>
-          {!offer && !clientApproved ? (
-            <p className="mt-2 text-xs text-app-secondary">
-              Client approval is required before creating an offer.
-            </p>
-          ) : offer ? (
-            <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-subtle">Status</dt>
-                <dd>
-                  <Badge variant={offerStatusVariant(offer.status)} className="text-[11px]">
-                    {offer.status}
-                  </Badge>
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-subtle">Offered CTC</dt>
-                <dd className="font-medium text-app-text">
-                  {offer.offered_ctc != null ? `₹ ${Number(offer.offered_ctc).toLocaleString('en-IN')}` : '—'}
-                </dd>
-              </div>
-              {offer.joining_date ? (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-app-subtle">Joining date</dt>
-                  <dd className="text-app-text">
-                    {new Date(offer.joining_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  </dd>
-                </div>
-              ) : null}
-              {offer.released_by_username ? (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-app-subtle">Released by</dt>
-                  <dd className="text-app-text">{offer.released_by_username}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <p className="mt-2 text-xs text-app-secondary">
-              {canOfferCreate ? 'No offer created yet.' : 'No offer on record for this application.'}
-            </p>
-          )}
-        </section>
-      ) : null}
-
-      <DeploymentPanel
-        application={row}
-        offer={offer}
-        canConvert={canConvert}
-        convertResult={convertResult}
-        onOpenConvert={() => setConvertDrawerOpen(true)}
-      />
-
-      {canMove ? (
-        <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-          <p className="text-sm font-semibold text-app-text">Admin correction</p>
-          <p className="mt-1 text-xs text-app-secondary">
-            Manual stage/status override for corrections only. Normal movement happens through the interview pipeline (apply plan, schedule rounds, submit feedback, create offer).
-          </p>
-          {moveError ? (
-            <div className="mt-3">
-              <ErrorState message={moveError} />
+      {/* Main Content Grid */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Left Column - 2/3 width */}
+        <div className="space-y-6 lg:col-span-2">
+          {/* Demand */}
+          <SectionCard
+            icon={<Briefcase className="h-5 w-5 text-brand-600" />}
+            iconBg="bg-brand-100 dark:bg-brand-900/40"
+            title="Demand Details"
+            subtitle="Hiring request information"
+          >
+            <div className="divide-y divide-app-border/50">
+              <InfoRow label="Client" value={row.client_name?.trim()} />
+              <InfoRow label="Site" value={row.site_name?.trim()} />
+              <InfoRow label="Job Role" value={row.job_role_name?.trim()} />
+              <InfoRow label="MRF Request" value={`#${row.mrf}`} mono />
             </div>
-          ) : null}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Select id="mv_stage" label="Next pipeline stage" value={moveStageId} onChange={(e) => setMoveStageId(e.target.value)}>
-              <option value="">Keep / choose stage</option>
-              {stages.map((s) => (
-                <option key={s.id} value={String(s.id)}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-            <Select id="mv_status" label="Status" value={moveStatus} onChange={(e) => setMoveStatus(e.target.value)}>
-              <option value="">Keep / choose status</option>
-              {HIRING_APPLICATION_STATUS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="mt-3">
-            <Input id="mv_comment" label="Comment" value={moveComment} onChange={(e) => setMoveComment(e.target.value)} />
-          </div>
-          <div className="mt-4">
-            <Button type="button" onClick={() => void submitMove()} disabled={moveBusy}>
-              {moveBusy ? 'Saving…' : 'Apply move'}
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <p className="text-xs text-app-subtle">You do not have access to move this application.</p>
-      )}
+          </SectionCard>
 
-      <p className="text-xs text-app-subtle">
-        <Link className="text-brand-700 underline" to={`/candidates/${row.candidate}`}>
-          Open full candidate profile
-        </Link>
-      </p>
+          {/* Match Score */}
+          <SectionCard
+            icon={<Target className="h-5 w-5 text-status-info" />}
+            iconBg="bg-status-info/10"
+            title="Match Score"
+            subtitle="Candidate-role compatibility"
+          >
+            {snapshotScorecard ? (
+              <CandidateMatchScorecard data={snapshotScorecard} />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-app-muted text-app-subtle">
+                  <Target className="h-6 w-6" />
+                </div>
+                <p className="mt-3 text-sm text-app-secondary">No match scorecard captured</p>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* Resumes */}
+          <SectionCard
+            icon={<FileText className="h-5 w-5 text-status-warning" />}
+            iconBg="bg-status-warning/10"
+            title="Resume Files"
+            subtitle={`${resumes.length} document${resumes.length === 1 ? '' : 's'} on file`}
+          >
+            {resumes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-app-muted text-app-subtle">
+                  <FileText className="h-6 w-6" />
+                </div>
+                <p className="mt-3 text-sm text-app-secondary">No resumes on file</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {resumes.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-4 rounded-xl border border-app-border bg-app-muted/30 p-4"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-app-muted text-app-secondary">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-app-text">
+                        {r.original_filename || `Resume #${r.id}`}
+                      </p>
+                      <Badge variant={resumeStatusVariant(r.status)} className="mt-1 text-[10px]">
+                        {resumeStatusLabel(r.status)}
+                      </Badge>
+                    </div>
+                    <ResumeFileActions resume={r} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+
+          {/* Stage History */}
+          <SectionCard
+            icon={<History className="h-5 w-5 text-app-secondary" />}
+            iconBg="bg-app-muted"
+            title="Stage History"
+            subtitle="Pipeline movement timeline"
+          >
+            {(row.recent_stage_history ?? []).length === 0 ? (
+              <p className="text-center text-sm text-app-secondary">No history yet</p>
+            ) : (
+              <div className="relative space-y-0">
+                <div className="absolute left-[15px] top-2 h-[calc(100%-16px)] w-0.5 bg-app-border" />
+                {(row.recent_stage_history ?? []).map((h) => (
+                  <div key={h.id} className="relative flex gap-4 pb-4 last:pb-0">
+                    <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-app-border bg-app-surface">
+                      <Clock className="h-3.5 w-3.5 text-app-subtle" />
+                    </div>
+                    <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-muted/30 p-3">
+                      <p className="text-sm font-medium text-app-text">
+                        {h.from_stage_name ?? 'Start'} → {h.to_stage_name ?? '—'}
+                      </p>
+                      <p className="mt-1 text-xs text-app-secondary">
+                        {hiringApplicationStatusLabel(h.to_status)}
+                        {h.moved_by_username && ` · By ${h.moved_by_username}`}
+                      </p>
+                      {h.comment && <p className="mt-2 text-xs italic text-app-subtle">{h.comment}</p>}
+                      {h.created_at && (
+                        <p className="mt-1 text-[10px] text-app-subtle">
+                          {new Date(h.created_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+
+          {/* Interviews */}
+          {canInterviewRead && (
+            <InterviewPanel
+              app={row}
+              plan={interviewPlan}
+              interviews={interviews}
+              feedbacks={feedbacks}
+              loading={interviewsLoading}
+              canCreate={canInterviewCreate}
+              canManage={canInterviewManage}
+              onChanged={async () => {
+                await loadApplication()
+                await loadInterviews()
+              }}
+            />
+          )}
+        </div>
+
+        {/* Right Column - 1/3 width */}
+        <div className="space-y-6">
+          {/* Offer Section */}
+          {canOfferRead && (
+            <SectionCard
+              icon={<IndianRupee className="h-5 w-5 text-status-hired" />}
+              iconBg="bg-status-hired/10"
+              title="Offer"
+              subtitle={offer ? `Status: ${offer.status}` : 'No offer yet'}
+              action={
+                (offer || readyForOffer) && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-9 gap-2 text-xs"
+                    onClick={() => setOfferDrawerOpen(true)}
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    {offer ? 'Manage' : 'Create'}
+                  </Button>
+                )
+              }
+            >
+              {!offer && !readyForOffer ? (
+                <p className="text-sm text-app-secondary">
+                  {needsClientReview
+                    ? 'Client approval required before creating an offer.'
+                    : 'Complete internal interview/selection clearance before creating an offer.'}
+                </p>
+              ) : offer ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-app-subtle">Status</span>
+                    <Badge variant={offerStatusVariant(offer.status)}>{offer.status}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-app-subtle">CTC</span>
+                    <span className="text-lg font-bold text-app-heading">
+                      {offer.offered_ctc != null ? `₹${Number(offer.offered_ctc).toLocaleString('en-IN')}` : '—'}
+                    </span>
+                  </div>
+                  {offer.joining_date && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-app-subtle">Joining</span>
+                      <span className="text-sm font-medium text-app-text">
+                        {new Date(offer.joining_date).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {offer.released_by_username && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-app-subtle">Released by</span>
+                      <span className="text-sm text-app-text">{offer.released_by_username}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-app-secondary">
+                  {canOfferCreate ? 'No offer created yet.' : 'No offer on record.'}
+                </p>
+              )}
+            </SectionCard>
+          )}
+
+          {/* Deployment */}
+          <DeploymentPanel
+            application={row}
+            offer={offer}
+            canConvert={canConvert}
+            convertResult={convertResult}
+            onOpenConvert={() => setConvertDrawerOpen(true)}
+          />
+
+          {/* Admin Correction */}
+          {canMove && (
+            <SectionCard
+              icon={<Settings className="h-5 w-5 text-app-secondary" />}
+              iconBg="bg-app-muted"
+              title="Admin Correction"
+              subtitle="Manual stage override"
+            >
+              {moveError && <ErrorState message={moveError} />}
+              <div className="space-y-3">
+                <Select
+                  id="mv_stage"
+                  label="Pipeline stage"
+                  value={moveStageId}
+                  onChange={(e) => setMoveStageId(e.target.value)}
+                >
+                  <option value="">Keep current</option>
+                  {stages.map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  id="mv_status"
+                  label="Status"
+                  value={moveStatus}
+                  onChange={(e) => setMoveStatus(e.target.value)}
+                >
+                  <option value="">Keep current</option>
+                  {HIRING_APPLICATION_STATUS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  id="mv_comment"
+                  label="Comment"
+                  value={moveComment}
+                  onChange={(e) => setMoveComment(e.target.value)}
+                  placeholder="Reason for override..."
+                />
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => void submitMove()}
+                  disabled={moveBusy}
+                >
+                  {moveBusy ? 'Saving…' : 'Apply Move'}
+                </Button>
+              </div>
+            </SectionCard>
+          )}
+        </div>
+      </div>
 
       <OfferFormDrawer
         open={offerDrawerOpen}
@@ -477,12 +667,16 @@ export function HiringApplicationDetailPage() {
         offer={offer}
         onSuccess={(updated) => {
           setOffer(updated)
-          setRow((prev) => prev ? {
-            ...prev,
-            offer_status: updated.status,
-            offered_ctc: updated.offered_ctc != null ? String(updated.offered_ctc) : null,
-            offer_joining_date: updated.joining_date ?? null,
-          } : prev)
+          setRow((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  offer_status: updated.status,
+                  offered_ctc: updated.offered_ctc != null ? String(updated.offered_ctc) : null,
+                  offer_joining_date: updated.joining_date ?? null,
+                }
+              : prev,
+          )
           setOfferDrawerOpen(false)
           void loadApplication()
         }}
@@ -495,7 +689,7 @@ export function HiringApplicationDetailPage() {
         onClose={() => setConvertDrawerOpen(false)}
         onSuccess={(result) => {
           setConvertResult(result)
-          setRow((prev) => prev ? { ...prev, status: 'deployed' } : prev)
+          setRow((prev) => (prev ? { ...prev, status: 'deployed' } : prev))
           setConvertDrawerOpen(false)
           const next = new URLSearchParams(searchParams)
           if (next.has('openConvert')) {
@@ -508,7 +702,7 @@ export function HiringApplicationDetailPage() {
   )
 }
 
-// ─── Deployment panel + conversion drawer ─────────────────────────────────────
+// ─── Deployment panel ─────────────────────────────────────────────────────────
 
 function isOfferAccepted(application: HiringApplicationRow, offer: OfferRow | null): boolean {
   if (offer?.status === 'accepted') return true
@@ -537,106 +731,83 @@ function DeploymentPanel({
   const accepted = isOfferAccepted(application, offer)
 
   return (
-    <section className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-app-text">Deployment</p>
-        {alreadyDeployed ? (
-          <Badge variant="success" className="text-[11px]">Deployed</Badge>
-        ) : null}
-      </div>
-
+    <SectionCard
+      icon={<Users className="h-5 w-5 text-status-info" />}
+      iconBg="bg-status-info/10"
+      title="Deployment"
+      subtitle={alreadyDeployed ? 'Employee deployed' : 'Convert to employee'}
+      action={alreadyDeployed && <Badge variant="success">Deployed</Badge>}
+    >
       {convertResult ? (
-        <div className="mt-3 space-y-3">
-          <div className="rounded border border-status-success/30 bg-status-success/5 p-3 text-xs text-app-text">
-            <p className="font-medium">
-              {convertResult.created_employee ? 'Employee created.' : 'Existing employee linked.'}{' '}
-              {convertResult.created_deployment
-                ? 'Deployment created.'
-                : 'Existing deployment reused.'}
-            </p>
-            <dl className="mt-2 grid gap-1 sm:grid-cols-2">
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-secondary">Employee</dt>
-                <dd>
-                  <span className="font-medium">
-                    {convertResult.employee.full_name ??
-                      `${convertResult.employee.first_name} ${convertResult.employee.last_name}`.trim()}
-                  </span>{' '}
-                  <span className="font-mono text-[11px]">[{convertResult.employee.employee_code}]</span>
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-secondary">Deployment</dt>
-                <dd className="font-mono">#{convertResult.deployment.id}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-secondary">Site</dt>
-                <dd>{convertResult.deployment.site_name ?? `Site #${convertResult.deployment.site}`}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-app-secondary">Status</dt>
-                <dd>
-                  <Badge variant="neutral" className="text-[11px]">
-                    {convertResult.deployment.status}
-                  </Badge>
-                </dd>
-              </div>
-            </dl>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Link
-                to={`/deployment/site-deployments?employee=${convertResult.employee.id}`}
-                className="inline-flex min-h-8 items-center rounded-panel border border-app-border bg-app-surface px-3 text-xs font-medium text-app-text hover:bg-app-muted"
-              >
-                Open deployments
-              </Link>
-              <Link
-                to="/deployment/employees"
-                className="inline-flex min-h-8 items-center rounded-panel border border-app-border bg-app-surface px-3 text-xs font-medium text-app-text hover:bg-app-muted"
-              >
-                Employees list
-              </Link>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-lg bg-status-hired/10 p-3">
+            <CheckCircle2 className="h-5 w-5 text-status-hired" />
+            <div>
+              <p className="text-sm font-medium text-status-hired">
+                {convertResult.created_employee ? 'Employee created' : 'Employee linked'}
+              </p>
+              <p className="text-xs text-app-secondary">
+                {convertResult.created_deployment ? 'Deployment created' : 'Existing deployment'}
+              </p>
             </div>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-app-subtle">Employee</span>
+              <span className="font-medium text-app-text">
+                {convertResult.employee.full_name ??
+                  `${convertResult.employee.first_name} ${convertResult.employee.last_name}`.trim()}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-app-subtle">Code</span>
+              <span className="font-mono text-xs text-app-text">{convertResult.employee.employee_code}</span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              to={`/deployment/site-deployments?employee=${convertResult.employee.id}`}
+              className="flex-1 inline-flex min-h-9 items-center justify-center rounded-lg border border-app-border bg-app-surface text-xs font-medium text-app-text hover:bg-app-muted"
+            >
+              Deployments
+            </Link>
+            <Link
+              to="/deployment/employees"
+              className="flex-1 inline-flex min-h-9 items-center justify-center rounded-lg border border-app-border bg-app-surface text-xs font-medium text-app-text hover:bg-app-muted"
+            >
+              Employees
+            </Link>
           </div>
         </div>
       ) : alreadyDeployed ? (
-        <div className="mt-3 space-y-2 text-xs text-app-secondary">
-          <p>This application has already been converted to a deployment.</p>
-          <Link to="/deployment/employees" className="inline-block text-brand-700 underline">
-            Open employees list
+        <div className="text-center">
+          <p className="text-sm text-app-secondary">Already converted to deployment</p>
+          <Link to="/deployment/employees" className="mt-2 inline-block text-sm text-brand-600 underline">
+            View employees
           </Link>
         </div>
       ) : !offer ? (
-        <p className="mt-2 text-xs text-app-secondary">
-          Create and release an offer first. Deployment requires an accepted offer.
-        </p>
+        <p className="text-sm text-app-secondary">Create and release an offer first.</p>
       ) : !accepted ? (
-        <p className="mt-2 text-xs text-app-secondary">
-          Offer must be accepted before this candidate can be deployed. Current offer status:{' '}
-          <span className="font-medium text-app-text">{offer.status}</span>.
+        <p className="text-sm text-app-secondary">
+          Offer must be accepted. Current: <span className="font-medium">{offer.status}</span>
         </p>
       ) : !canConvert ? (
-        <p className="mt-2 text-xs text-app-secondary">
-          Offer is accepted. You do not have permission to convert applications to deployments.
-        </p>
+        <p className="text-sm text-app-secondary">No permission to convert.</p>
       ) : (
-        <div className="mt-3 space-y-2">
-          <p className="text-xs text-app-secondary">
-            Offer is accepted. Create the employee record and an initial site deployment.
-          </p>
-          <Button
-            type="button"
-            variant="primary"
-            className="min-h-9 px-3 text-sm"
-            onClick={onOpenConvert}
-          >
-            Convert to deployment
+        <div className="space-y-3">
+          <p className="text-sm text-app-secondary">Offer accepted. Ready to deploy.</p>
+          <Button type="button" className="w-full gap-2" onClick={onOpenConvert}>
+            <Users className="h-4 w-4" />
+            Convert to Deployment
           </Button>
         </div>
       )}
-
-    </section>
+    </SectionCard>
   )
 }
+
+// ─── Convert drawer ───────────────────────────────────────────────────────────
 
 function ConvertToDeploymentDrawer({
   open,
@@ -711,41 +882,29 @@ function ConvertToDeploymentDrawer({
     <Drawer
       open={open}
       onClose={() => !busy && onClose()}
-      title="Convert to deployment"
-      description="Create the employee and a site deployment for this accepted application."
+      title="Convert to Deployment"
+      description="Create employee record and site deployment"
       footer={
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            className="min-h-9 px-3 text-sm"
-            disabled={busy}
-            onClick={onClose}
-          >
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" className="min-h-10" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            className="min-h-9 px-3 text-sm"
-            disabled={busy}
-            onClick={() => void handleSubmit()}
-          >
+          <Button type="button" className="min-h-10 gap-2" disabled={busy} onClick={() => void handleSubmit()}>
             {busy ? 'Converting…' : 'Convert'}
           </Button>
         </div>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <Input
           id="cd_emp_code"
-          label="Employee code (optional)"
+          label="Employee code"
           placeholder="Auto-generated if blank"
           value={employeeCode}
           onChange={(e) => setEmployeeCode(e.target.value)}
         />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
             <label htmlFor="cd_joined_on" className="text-sm font-medium text-app-secondary">
               Joined on
             </label>
@@ -754,23 +913,23 @@ function ConvertToDeploymentDrawer({
               type="date"
               value={joinedOn}
               onChange={(e) => setJoinedOn(e.target.value)}
-              className="min-h-10 rounded-panel border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+              className="min-h-10 rounded-xl border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <label htmlFor="cd_start_date" className="text-sm font-medium text-app-secondary">
-              Deployment start date
+              Deployment start
             </label>
             <input
               id="cd_start_date"
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="min-h-10 rounded-panel border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+              className="min-h-10 rounded-xl border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Select
             id="cd_status"
             label="Initial status"
@@ -782,7 +941,7 @@ function ConvertToDeploymentDrawer({
           </Select>
           <Select
             id="cd_billing"
-            label="Billing type (optional)"
+            label="Billing type"
             value={billingType}
             onChange={(e) => setBillingType((e.target.value as 'billable' | 'non_billable' | '') || '')}
           >
@@ -793,29 +952,27 @@ function ConvertToDeploymentDrawer({
         </div>
         <Input
           id="cd_shift"
-          label="Shift hours (optional)"
+          label="Shift hours"
           type="number"
           step="0.1"
           min="0"
           value={shiftHours}
           onChange={(e) => setShiftHours(e.target.value)}
-          placeholder="e.g. 8 or 8.5"
+          placeholder="e.g. 8"
         />
-        <label className="flex items-start gap-2 text-sm text-app-text">
+        <label className="flex items-start gap-3 rounded-xl border border-app-border bg-app-muted/30 p-4">
           <input
             type="checkbox"
             checked={allowExisting}
             onChange={(e) => setAllowExisting(e.target.checked)}
             className="mt-0.5 h-4 w-4 rounded border-app-border"
           />
-          <span>
-            Reuse existing employee if matched by code or phone
-            <span className="block text-xs text-app-subtle">
-              Otherwise a duplicate phone or code will return an error.
-            </span>
-          </span>
+          <div>
+            <span className="text-sm font-medium text-app-text">Reuse existing employee</span>
+            <p className="text-xs text-app-subtle">Match by code or phone if exists</p>
+          </div>
         </label>
-        {error ? <ErrorState message={error} /> : null}
+        {error && <ErrorState message={error} />}
       </div>
     </Drawer>
   )

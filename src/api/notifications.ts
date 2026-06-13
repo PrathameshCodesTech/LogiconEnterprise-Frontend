@@ -6,6 +6,7 @@ import { unwrapDrfResults, type DrfPaginated } from '@/types/api'
 import type {
   NotificationRow,
   NotificationListParams,
+  NotificationUnreadCount,
 } from '@/features/notifications/types'
 
 /**
@@ -26,6 +27,14 @@ export async function listNotifications(
     { params: query }
   )
   return unwrapDrfResults(data)
+}
+
+/**
+ * Get current user's unread notification count.
+ */
+export async function getNotificationUnreadCount(): Promise<NotificationUnreadCount> {
+  const { data } = await api.get<NotificationUnreadCount>('/api/notifications/unread-count/')
+  return data
 }
 
 /**

@@ -20,13 +20,28 @@ export interface HiringDemandRow {
   client_name?: string | null
   job_role_id: number
   job_role_name?: string | null
-  billing_type?: string | null
+  billing_type?: 'billable' | 'non_billable' | string | null
   requested_headcount: number
   application_count: number
   shortlisted_count: number
   selected_count: number
   offer_accepted_count: number
   open_count: number
+  // Lane fields (backend source of truth)
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
+  requires_client_review?: boolean | null
+  // Department fields
+  requesting_department_id?: number | null
+  requesting_department_name?: string | null
+  requesting_department_code?: string | null
+  required_department_id?: number | null
+  required_department_name?: string | null
+  required_department_code?: string | null
+  // Resolved budget fields
+  resolved_budget_plan_id?: number | null
+  resolved_budget_plan_name?: string | null
+  resolved_budget_plan_code?: string | null
 }
 
 export interface ApplicationStageHistoryBriefRow {
@@ -63,6 +78,8 @@ export interface HiringApplicationRow {
   status: string
   interview_plan?: number | null
   match_score?: string | number | null
+  match_result?: number | null
+  match_snapshot?: MatchSnapshot | null
   shortlisted_by?: number | null
   shortlisted_at?: string | null
   client_visible?: boolean
@@ -77,6 +94,11 @@ export interface HiringApplicationRow {
   recent_stage_history?: ApplicationStageHistoryBriefRow[]
   created_at?: string
   updated_at?: string
+  // Lane fields (backend source of truth)
+  billing_type?: 'billable' | 'non_billable' | string | null
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
+  requires_client_review?: boolean | null
 }
 
 export interface HiringApplicationWriteInput {
@@ -198,6 +220,11 @@ export interface ClientReviewApplicationRow {
   resume_summary?: ClientResumeSummary | null
   created_at?: string
   updated_at?: string
+  // Lane fields (backend source of truth)
+  billing_type?: 'billable' | 'non_billable' | string | null
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
+  requires_client_review?: boolean | null
 }
 
 /** Candidate summary embedded in ranked pool results */
@@ -216,16 +243,63 @@ export interface PoolCandidateSummary {
   skills_count?: number
   lifecycle_status?: string
   availability_status?: string | null
+  latest_source_type?: string | null
+  // Candidate journey fields (computed by backend)
+  journey_status?: string | null
+  journey_status_label?: string | null
+}
+
+/** Per-dimension match score breakdown (0–100 each). */
+export interface MatchScoreBreakdown {
+  role?: number | null
+  skills?: number | null
+  experience?: number | null
+  location?: number | null
+  availability?: number | null
+  industry?: number | null
+  education?: number | null
+  salary?: number | null
+  semantic?: number | null
+  data_quality?: number | null
+}
+
+/** Captured at shortlist time — GET /api/hiring/applications/ match_snapshot */
+export interface MatchSnapshot {
+  match_result?: number | null
+  score?: number | null
+  match_source?: string | null
+  score_breakdown?: MatchScoreBreakdown | null
+  matched_skills?: string[]
+  missing_skills?: string[]
+  reasons?: string[]
+  warnings?: string[]
+  details?: Record<string, unknown> | null
+}
+
+/** Shared props for candidate match scorecard UI. */
+export interface CandidateMatchScorecardData {
+  candidateName?: string
+  candidatePhone?: string
+  score?: number | null
+  matchStatus?: string | null
+  scoreBreakdown?: MatchScoreBreakdown | null
+  matchedSkills?: string[]
+  missingSkills?: string[]
+  extraCandidateSkills?: string[]
+  reasons?: string[]
+  warnings?: string[]
 }
 
 /** GET /api/hiring/demands/{id}/candidate-pool/?ranked=true */
 export interface CandidatePoolResultRow {
   candidate: PoolCandidateSummary
+  match_result?: number | null
   score?: number | null
   match_status?: string | null
-  score_breakdown?: Record<string, number | null>
+  score_breakdown?: MatchScoreBreakdown | null
   matched_skills?: string[]
   missing_skills?: string[]
+  extra_candidate_skills?: string[]
   reasons?: string[]
   warnings?: string[]
 }
@@ -389,18 +463,71 @@ export interface CandidateMatchResultRow {
   skill_score?: string | number | null
   experience_score?: string | number | null
   location_score?: string | number | null
+  availability_score?: string | number | null
   industry_score?: string | number | null
   education_score?: string | number | null
   salary_score?: string | number | null
   semantic_score?: string | number | null
-  matched_skills?: unknown
-  missing_skills?: unknown
-  match_reason?: string | null
-  warnings?: unknown
-  match_details?: unknown
+  matched_skills?: string[]
+  missing_skills?: string[]
+  match_reason?: string[] | string | null
+  warnings?: string[]
+  match_details?: MatchScoreBreakdown | null
   match_score?: string | number | null
   match_source?: string | null
   is_auto_match?: boolean
   created_by?: number | null
   created_at?: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interview Assignments
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InterviewAssignmentState =
+  | 'upcoming'
+  | 'pending_feedback'
+  | 'completed'
+  | 'held'
+  | 'rejected'
+
+/** GET /api/hiring/interviews/assignments/ */
+export interface InterviewAssignmentRow {
+  id: number
+  application: number
+  candidate_name: string
+  candidate_phone: string
+  client_name: string | null
+  site_name: string | null
+  job_role_name: string | null
+  application_status: string
+  planned_round: number | null
+  planned_round_name: string | null
+  round_type: string
+  round_number: number
+  scheduled_at: string | null
+  scheduled_by: number | null
+  scheduled_by_name: string | null
+  interviewer: number | null
+  interviewer_name: string | null
+  status: string
+  assignment_state: InterviewAssignmentState
+  mode: string
+  location: string
+  meeting_link: string
+  latest_feedback: InterviewFeedbackRow | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InterviewAssignmentsResponse {
+  count: number
+  counts: {
+    upcoming: number
+    pending_feedback: number
+    completed: number
+    held: number
+    rejected: number
+  }
+  results: InterviewAssignmentRow[]
 }

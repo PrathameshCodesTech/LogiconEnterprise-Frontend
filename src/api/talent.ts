@@ -1,14 +1,20 @@
 import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
+import { saveBlob } from '@/lib/fileDownload'
 import type {
   ApplyReviewPayload,
   CandidateEducationRow,
   CandidateExperienceRow,
+  CandidateMergeInput,
+  CandidateMergeResult,
+  CandidateSkillRow,
   CandidateRow,
   CandidateWriteInput,
   DuplicateResolutionPayload,
+  ExcelImportResponse,
   ManualResumeIntakeResponse,
   ParsedResumeRow,
+  ResumeImportBatch,
   ResumeReviewDetail,
   ResumeReviewQueueItem,
   ResumeRow,
@@ -18,9 +24,15 @@ import type {
 export interface ListCandidatesParams {
   search?: string
   skill?: string
+  document_type?: string
+  min_experience?: string | number
+  max_experience?: string | number
+  location?: string
   lifecycle_status?: string
   availability_status?: string
-  source?: string
+  journey_status?: string
+  source_type?: string
+  target_job_role?: number
   is_blacklisted?: boolean
   page?: number
 }
@@ -50,6 +62,9 @@ export interface ListResumesParams {
   status?: string
   parsed_status?: string
   source_type?: string
+  target_job_role?: number
+  target_role_source?: string
+  import_batch_id?: string
   page?: number
 }
 
@@ -71,6 +86,67 @@ export async function uploadResume(formData: FormData): Promise<ResumeRow> {
 /** POST /api/talent/manual-resume-intake/ - multipart FormData */
 export async function manualResumeIntake(formData: FormData): Promise<ManualResumeIntakeResponse> {
   const res = await api.post<ManualResumeIntakeResponse>('/api/talent/manual-resume-intake/', formData)
+  return res.data
+}
+
+export interface BulkUploadResumesInput {
+  target_job_role: number
+  files: File[]
+  source_type?: string
+  view_only_note?: string
+}
+
+/** POST /api/talent/resumes/bulk-upload/ - queues async role-tagged multi-file intake */
+export async function bulkUploadResumes(input: BulkUploadResumesInput): Promise<ResumeImportBatch> {
+  const fd = new FormData()
+  fd.append('target_job_role', String(input.target_job_role))
+  fd.append('source_type', input.source_type ?? 'bulk_upload')
+  if (input.view_only_note?.trim()) fd.append('view_only_note', input.view_only_note.trim())
+  for (const file of input.files) {
+    fd.append('files', file)
+  }
+  const res = await api.post<ResumeImportBatch>('/api/talent/resumes/bulk-upload/', fd)
+  return res.data
+}
+
+export interface ListResumeImportBatchesParams {
+  target_job_role?: number
+  status?: string
+  document_type?: string
+  source_type?: string
+  created_by?: string | number
+  created_from?: string
+  created_to?: string
+  page?: number
+}
+
+/** GET /api/talent/resumes/import-batches/ */
+export async function listResumeImportBatches(
+  params?: ListResumeImportBatchesParams,
+): Promise<{ items: ResumeImportBatch[]; count?: number }> {
+  const res = await api.get('/api/talent/resumes/import-batches/', { params })
+  return unwrapDrfResults<ResumeImportBatch>(res.data)
+}
+
+/** GET /api/talent/resumes/import-batches/{id}/ */
+export async function getResumeImportBatch(id: number): Promise<ResumeImportBatch> {
+  const res = await api.get<ResumeImportBatch>(`/api/talent/resumes/import-batches/${id}/`)
+  return res.data
+}
+
+export interface ExcelImportCandidatesInput {
+  target_job_role: number
+  file: File
+  source_type?: string
+}
+
+/** POST /api/talent/resumes/excel-import/ - role-tagged candidate import from CSV/XLSX */
+export async function excelImportCandidates(input: ExcelImportCandidatesInput): Promise<ExcelImportResponse> {
+  const fd = new FormData()
+  fd.append('target_job_role', String(input.target_job_role))
+  fd.append('source_type', input.source_type ?? 'excel_import')
+  fd.append('file', input.file)
+  const res = await api.post<ExcelImportResponse>('/api/talent/resumes/excel-import/', fd)
   return res.data
 }
 
@@ -96,6 +172,18 @@ export async function listCandidateEducations(
 ): Promise<{ items: CandidateEducationRow[]; count?: number }> {
   const res = await api.get('/api/talent/educations/', { params })
   return unwrapDrfResults<CandidateEducationRow>(res.data)
+}
+
+export interface ListCandidateSkillsParams {
+  candidate: number
+  page?: number
+}
+
+export async function listCandidateSkills(
+  params: ListCandidateSkillsParams,
+): Promise<{ items: CandidateSkillRow[]; count?: number }> {
+  const res = await api.get('/api/talent/skills/', { params })
+  return unwrapDrfResults<CandidateSkillRow>(res.data)
 }
 
 export interface ListParsedResumesParams {
@@ -130,7 +218,9 @@ export async function markResumeReviewed(id: number): Promise<{ detail: string }
 
 export interface ListResumeReviewQueueParams {
   status?: string
+  document_type?: string
   source_type?: string
+  uploaded_by?: string | number
   confidence_below?: string | number
   candidate?: string
   uploaded_from?: string
@@ -167,4 +257,16 @@ export async function resolveResumeDuplicate(
 ): Promise<TalentResumeReviewRow> {
   const res = await api.post(`/api/talent/resumes/${id}/resolve-duplicate/`, payload)
   return res.data as TalentResumeReviewRow
+}
+
+/** POST /api/talent/candidates/{id}/merge/ — merge source candidate into target */
+export async function mergeCandidate(id: number, payload: CandidateMergeInput): Promise<CandidateMergeResult> {
+  const res = await api.post<CandidateMergeResult>(`/api/talent/candidates/${id}/merge/`, payload)
+  return res.data
+}
+
+/** GET /api/talent/resumes/excel-template/ — download standard import template */
+export async function downloadResumeExcelTemplate(): Promise<void> {
+  const res = await api.get('/api/talent/resumes/excel-template/', { responseType: 'blob' })
+  saveBlob(res.data as Blob, 'candidate_import_template.csv')
 }

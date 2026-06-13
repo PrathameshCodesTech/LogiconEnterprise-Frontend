@@ -146,11 +146,13 @@ export interface SiteSurveyShiftDeployment {
   description?: string
   job_role?: number | null
   job_role_name?: string | null
+  job_role_code?: string | null
   shift_label?: string
   general_count?: number | null
   first_shift_count?: number | null
   second_shift_count?: number | null
-  total_count?: number | null
+  night_shift_count?: number | null
+  total_count?: number | null // Read-only, calculated by backend
   remarks?: string
   is_applicable?: boolean
   not_applicable_reason?: string | null
@@ -242,6 +244,7 @@ export interface ProposalVersion {
   client_remarks?: string | null
   client_response_at?: string | null
   client_approved_at?: string | null
+  sent_to_client_at?: string | null
 }
 
 export type ProposalVersionWriteInput = {
@@ -355,6 +358,7 @@ export interface GenerateRoleRequirementError {
 
 export interface GenerateRoleRequirementsResult {
   created: GenerateRoleRequirementCreated[]
+  updated: GenerateRoleRequirementCreated[]
   skipped: GenerateRoleRequirementSkipped[]
   errors: GenerateRoleRequirementError[]
 }
@@ -491,15 +495,30 @@ export interface SalesDashboardSummary {
 
 export interface PublicBudgetLine {
   id: number
+  site?: number | null
+  site_id?: number | null
+  site_name?: string | null
+  role_requirement?: number | null
+  job_role?: number | null
+  job_role_id?: number | null
+  job_role_name?: string | null
   description?: string
   service_category?: string | null
   manpower_count?: number | null
   unit_cost?: string | null
   total_cost?: string | null
+  sort_order?: number
 }
 
 export interface PublicBreakupLine {
   id: number
+  site?: number | null
+  site_id?: number | null
+  site_name?: string | null
+  role_requirement?: number | null
+  job_role?: number | null
+  job_role_id?: number | null
+  job_role_name?: string | null
   component_name?: string
   component_type?: string
   percentage?: string | null
@@ -510,6 +529,11 @@ export interface PublicBreakupLine {
 export interface PublicProposalResponse {
   token: string
   client_name: string
+  client_contact_person?: string | null
+  client_email?: string | null
+  client_phone?: string | null
+  recipient_name?: string | null
+  recipient_email?: string | null
   proposal_version_number?: number | null
   proposal_status?: string | null
   grand_total?: string | null

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
+import { MousePointerClick, Search } from 'lucide-react'
 import { deactivateRole, listRolePermissions, listRoles, type AccessRole } from '@/api/access'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
@@ -211,11 +211,19 @@ export function RolesPage() {
           )}
         </div>
 
-        <div className="min-w-0 rounded-panel border border-app-border bg-app-surface p-4 shadow-panel lg:min-h-[320px]">
+        <div className="min-w-0 rounded-xl border border-app-border bg-app-surface shadow-sm lg:min-h-[320px]">
           {selected ? (
             <RoleCatalogDetail role={selected} />
           ) : (
-            <p className="text-sm text-app-secondary">Select a role to view details and permission summary.</p>
+            <div className="flex h-full min-h-[320px] flex-col items-center justify-center p-6 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-brand-100">
+                <MousePointerClick className="h-7 w-7 text-brand-600" aria-hidden />
+              </div>
+              <p className="mt-4 text-sm font-medium text-app-text">No role selected</p>
+              <p className="mt-1 text-sm text-app-secondary">
+                Select a role from the list to view details and permissions
+              </p>
+            </div>
           )}
         </div>
       </div>

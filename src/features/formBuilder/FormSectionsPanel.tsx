@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Layers, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
@@ -166,65 +166,79 @@ export function FormSectionsPanel({
   }
 
   return (
-    <div className="rounded-panel border border-app-border bg-app-surface p-4 shadow-panel">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-app-text">Sections</p>
-          <p className="text-xs text-app-secondary">Group fields under named sections. Sort order controls display order.</p>
+    <div className="space-y-4">
+      {/* Header Card */}
+      <div className="flex flex-col gap-4 rounded-xl border border-app-border bg-app-surface p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-100">
+            <Layers className="h-5 w-5 text-brand-600" aria-hidden />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-app-text">Form Sections</h3>
+            <p className="text-sm text-app-secondary">Organize your form into logical groups</p>
+          </div>
         </div>
         {canEdit ? (
-          <Button onClick={openCreate} className="sm:self-start">
-            <Plus className="mr-1 h-4 w-4" aria-hidden />
-            Add section
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" aria-hidden />
+            Add Section
           </Button>
         ) : null}
       </div>
 
-      <div className="mt-4">
+      {/* Sections List */}
+      <div className="rounded-xl border border-app-border bg-app-surface shadow-sm">
         {loading ? (
-          <Spinner label="Loading sections..." />
+          <div className="p-6">
+            <Spinner label="Loading sections..." />
+          </div>
         ) : error ? (
-          <ErrorState message={error} />
+          <div className="p-4">
+            <ErrorState message={error} />
+          </div>
         ) : sorted.length === 0 ? (
-          <EmptyState
-            title="No sections yet"
-            description="Add sections such as Contact Details, Applying For, General Information, and Documents."
-          />
+          <div className="p-6">
+            <EmptyState
+              title="No sections yet"
+              description="Add sections such as Contact Details, Applying For, General Information, and Documents."
+            />
+          </div>
         ) : (
-          <ul className="space-y-2">
+          <ul className="divide-y divide-app-border">
             {sorted.map((row, idx) => (
               <li
                 key={row.id}
-                className="flex flex-col gap-2 rounded border border-app-border bg-app-muted px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-app-muted/50"
               >
-                <div className="flex min-w-0 items-start gap-3">
-                  {/* Position badge */}
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-app-surface border border-app-border text-xs font-semibold tabular-nums text-app-secondary">
-                    {idx + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-app-text">{row.name}</span>
-                      <span className="rounded border border-app-border bg-app-surface px-2 py-0.5 font-mono text-[11px] text-app-secondary">
-                        {row.code}
-                      </span>
-                    {row.is_active ? (
-                        <Badge variant="success">Active</Badge>
-                      ) : (
-                        <Badge variant="neutral">Inactive</Badge>
-                      )}
-                    </div>
-                    {row.description ? (
-                      <p className="mt-1 text-xs text-app-secondary">{row.description}</p>
-                    ) : null}
-                  </div>
+                {/* Position Number */}
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
+                  {idx + 1}
                 </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-1">
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-app-text">{row.name}</span>
+                    <span className="rounded bg-app-muted px-1.5 py-0.5 font-mono text-[11px] text-app-subtle">
+                      {row.code}
+                    </span>
+                    {row.is_active ? (
+                      <Badge variant="success">Active</Badge>
+                    ) : (
+                      <Badge variant="neutral">Inactive</Badge>
+                    )}
+                  </div>
+                  {row.description ? (
+                    <p className="mt-0.5 text-xs text-app-secondary">{row.description}</p>
+                  ) : null}
+                </div>
+
+                {/* Actions */}
+                <div className="flex shrink-0 items-center gap-1 opacity-60 group-hover:opacity-100">
                   <Button
                     type="button"
                     variant="ghost"
-                    className="min-h-9 px-2"
+                    className="min-h-8 px-2"
                     onClick={() => move(row, -1)}
                     disabled={!canEdit || idx === 0}
                     aria-label="Move up"
@@ -235,7 +249,7 @@ export function FormSectionsPanel({
                   <Button
                     type="button"
                     variant="ghost"
-                    className="min-h-9 px-2"
+                    className="min-h-8 px-2"
                     onClick={() => move(row, 1)}
                     disabled={!canEdit || idx === sorted.length - 1}
                     aria-label="Move down"
@@ -246,8 +260,8 @@ export function FormSectionsPanel({
                   {canEdit ? (
                     <Button
                       type="button"
-                      variant="secondary"
-                      className="min-h-9 px-2"
+                      variant="ghost"
+                      className="min-h-8 px-2"
                       onClick={() => openEdit(row)}
                       aria-label="Edit section"
                       title="Edit"
@@ -258,8 +272,8 @@ export function FormSectionsPanel({
                   {canDelete ? (
                     <Button
                       type="button"
-                      variant="danger"
-                      className="min-h-9 px-2"
+                      variant="ghost"
+                      className="min-h-8 px-2 text-status-danger hover:bg-status-danger/10"
                       onClick={() => handleDelete(row)}
                       aria-label="Deactivate section"
                       title="Deactivate"

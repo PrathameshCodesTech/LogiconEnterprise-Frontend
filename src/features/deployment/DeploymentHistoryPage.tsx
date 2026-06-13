@@ -143,7 +143,7 @@ export function DeploymentHistoryPage() {
             placeholder="Search employee code or name…"
             value={search}
             onChange={(e) => setField('search', e.target.value)}
-            className="w-full rounded-panel border border-app-border bg-app-muted py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="w-full rounded-panel border border-app-border bg-app-surface py-2 pl-9 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">

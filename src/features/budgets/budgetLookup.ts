@@ -107,6 +107,46 @@ export async function loadNonBillableBudgetOptionsForDepartments(
   return { ok: true, items: [...map.values()] }
 }
 
+/**
+ * Strict internal hiring budget lookup for a specific department.
+ * Filters: budget_nature=non_billable, budget_type=hiring,
+ *          department=deptId, status=active, is_active=true
+ *
+ * Returns:
+ * - ok=true, budget=row if exactly one matching budget
+ * - ok=true, budget=null if no matching budget
+ * - ok=false, error=string if multiple budgets found or API error
+ */
+export async function loadInternalHiringBudgetForDepartment(
+  departmentId: number,
+): Promise<{ ok: true; budget: BudgetPlanRow | null } | { ok: false; error: string }> {
+  if (!Number.isFinite(departmentId) || departmentId < 1) {
+    return { ok: true, budget: null }
+  }
+  try {
+    const res = await listBudgetPlans({
+      budget_nature: 'non_billable',
+      budget_type: 'hiring',
+      department: departmentId,
+      status: 'active',
+      is_active: true,
+      page: 1,
+    })
+    if (res.items.length === 0) {
+      return { ok: true, budget: null }
+    }
+    if (res.items.length > 1) {
+      return {
+        ok: false,
+        error: `Multiple active internal hiring budgets found for this department (${res.items.length}). Please ensure only one is active.`,
+      }
+    }
+    return { ok: true, budget: res.items[0] ?? null }
+  } catch (e: unknown) {
+    return { ok: false, error: parseApiError(e, 'Internal hiring budget lookup failed').message }
+  }
+}
+
 /** Generic entry: prefer specialized helpers above. */
 export async function loadBudgetOptions(
   params: Omit<ListBudgetPlansParams, 'page' | 'status'>,
