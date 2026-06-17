@@ -62,6 +62,12 @@ export function ClientEmployeesPage() {
   const status = params.get('status') ?? ''
   const page = parsePage(params.get('page'))
 
+  // Local filter state for controlled inputs (synced to URL on "Search" click)
+  const [searchInput, setSearchInput] = useState(search)
+  const [siteInput, setSiteInput] = useState(siteFilter != null ? String(siteFilter) : '')
+  const [roleInput, setRoleInput] = useState(jobRole != null ? String(jobRole) : '')
+  const [statusInput, setStatusInput] = useState(status)
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<EmployeeRow[]>([])
@@ -128,12 +134,22 @@ export function ClientEmployeesPage() {
     }
   }, [status, jobRole, search, page])
 
-  function setField(key: string, value: string) {
-    const p = new URLSearchParams(params)
-    if (value) p.set(key, value)
-    else p.delete(key)
+  function applyFilters() {
+    const p = new URLSearchParams()
+    if (searchInput.trim()) p.set('search', searchInput.trim())
+    if (siteInput) p.set('site', siteInput)
+    if (roleInput) p.set('job_role', roleInput)
+    if (statusInput) p.set('status', statusInput)
     p.set('page', '1')
     setParams(p, { replace: true })
+  }
+
+  function clearFilters() {
+    setSearchInput('')
+    setSiteInput('')
+    setRoleInput('')
+    setStatusInput('')
+    setParams(new URLSearchParams(), { replace: true })
   }
 
   function goToPage(next: number) {
@@ -141,6 +157,8 @@ export function ClientEmployeesPage() {
     p.set('page', String(next))
     setParams(p, { replace: true })
   }
+
+  const hasActiveFilters = search || siteFilter != null || jobRole != null || status
 
   const roleNameById = useMemo(() => {
     const m = new Map<number, string>()
@@ -172,14 +190,15 @@ export function ClientEmployeesPage() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" aria-hidden />
           <input
             type="search"
-            placeholder="Search code, name, phone, email…"
-            value={search}
-            onChange={(e) => setField('search', e.target.value)}
+            placeholder="Search code, name, phone, email..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
             className="w-full rounded-panel border border-app-border bg-app-muted py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Select id="emp_site" label="Site" value={siteFilter != null ? String(siteFilter) : ''} onChange={(e) => setField('site', e.target.value)}>
+          <Select id="emp_site" label="Site" value={siteInput} onChange={(e) => setSiteInput(e.target.value)}>
             <option value="">Any site</option>
             {sites.map((s) => (
               <option key={s.id} value={String(s.id)}>
@@ -187,7 +206,7 @@ export function ClientEmployeesPage() {
               </option>
             ))}
           </Select>
-          <Select id="emp_role" label="Job role" value={jobRole != null ? String(jobRole) : ''} onChange={(e) => setField('job_role', e.target.value)}>
+          <Select id="emp_role" label="Job role" value={roleInput} onChange={(e) => setRoleInput(e.target.value)}>
             <option value="">Any role</option>
             {roles.map((r) => (
               <option key={r.id} value={String(r.id)}>
@@ -195,13 +214,32 @@ export function ClientEmployeesPage() {
               </option>
             ))}
           </Select>
-          <Select id="emp_status" label="Status" value={status} onChange={(e) => setField('status', e.target.value)}>
+          <Select id="emp_status" label="Status" value={statusInput} onChange={(e) => setStatusInput(e.target.value)}>
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value || 'any'} value={o.value}>
                 {o.label}
               </option>
             ))}
           </Select>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-9 px-3 text-sm"
+            onClick={clearFilters}
+            disabled={!hasActiveFilters && !searchInput && !siteInput && !roleInput && !statusInput}
+          >
+            Clear
+          </Button>
+          <Button
+            type="button"
+            className="min-h-9 px-4 text-sm"
+            onClick={applyFilters}
+            disabled={loading}
+          >
+            Search
+          </Button>
         </div>
       </div>
 

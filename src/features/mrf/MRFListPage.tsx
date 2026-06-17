@@ -103,6 +103,8 @@ export function MRFListPage() {
   const [deleteCandidateId, setDeleteCandidateId] = useState<number | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const effectiveRequestedByType = isClient ? 'client' : requested_by_type || undefined
+  const effectiveBillingType = isClient ? 'billable' : billing_type || undefined
 
   function updateParam(next: Record<string, string | null>) {
     const p = new URLSearchParams(params)
@@ -136,9 +138,9 @@ export function MRFListPage() {
         search: search || undefined,
         status: status || undefined,
         site,
-        requested_by_type: requested_by_type || undefined,
+        requested_by_type: effectiveRequestedByType,
         mrf_type: mrf_type || undefined,
-        billing_type: billing_type || undefined,
+        billing_type: effectiveBillingType,
         page,
       })
       setRows(res.items)
@@ -189,7 +191,7 @@ export function MRFListPage() {
   useEffect(() => {
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, site, requested_by_type, mrf_type, billing_type, page])
+  }, [search, status, site, requested_by_type, mrf_type, billing_type, page, isClient])
 
   useEffect(() => {
     void loadLookups()
@@ -316,16 +318,28 @@ export function MRFListPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-app-text">MRF</h2>
-          <p className="text-sm text-app-secondary">Manpower requests raised for sites, with role line items.</p>
+          <p className="text-sm text-app-secondary">
+            {isClient
+              ? 'Manpower requests raised for your sites.'
+              : 'Manpower requests raised for sites and internal departments.'}
+          </p>
         </div>
         {canCreate ? (
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Button onClick={openCreateBillable} className="sm:self-start" disabled={!!lookupError}>
-              Create Client/Site MRF
-            </Button>
-            <Button onClick={openCreateInternal} variant="secondary" className="sm:self-start">
-              Create Internal MRF
-            </Button>
+            {isClient ? (
+              <Button onClick={openCreateBillable} className="sm:self-start" disabled={!!lookupError}>
+                Create manpower request
+              </Button>
+            ) : (
+              <>
+                <Button onClick={openCreateBillable} className="sm:self-start" disabled={!!lookupError}>
+                  Create Client/Site MRF
+                </Button>
+                <Button onClick={openCreateInternal} variant="secondary" className="sm:self-start">
+                  Create Internal MRF
+                </Button>
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -356,7 +370,11 @@ export function MRFListPage() {
               variant="ghost"
               className="min-h-9 px-2 text-sm text-app-secondary"
               onClick={clearFilters}
-              disabled={!search && !status && !site && !client && !requested_by_type && !mrf_type && !billing_type}
+              disabled={
+                isClient
+                  ? !search && !status && !site && !mrf_type
+                  : !search && !status && !site && !client && !requested_by_type && !mrf_type && !billing_type
+              }
             >
               Clear
             </Button>
@@ -377,20 +395,22 @@ export function MRFListPage() {
             <option value="cancelled">Cancelled</option>
           </Select>
 
-          <Select
-            id="mrf_client"
-            label="Client (page filter)"
-            value={client ? String(client) : ''}
-            onChange={(e) => updateParam({ client: e.target.value || null })}
-            disabled={lookupsLoading || !!lookupError}
-          >
-            <option value="">All</option>
-            {clients.map((c) => (
-              <option key={c.id} value={String(c.id)}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          {!isClient ? (
+            <Select
+              id="mrf_client"
+              label="Client (page filter)"
+              value={client ? String(client) : ''}
+              onChange={(e) => updateParam({ client: e.target.value || null })}
+              disabled={lookupsLoading || !!lookupError}
+            >
+              <option value="">All</option>
+              {clients.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
 
           <Select
             id="mrf_site"
@@ -407,16 +427,18 @@ export function MRFListPage() {
             ))}
           </Select>
 
-          <Select
-            id="mrf_requested_by_type"
-            label="Requested by type"
-            value={requested_by_type}
-            onChange={(e) => updateParam({ requested_by_type: e.target.value || null })}
-          >
-            <option value="">All</option>
-            <option value="internal">Internal</option>
-            <option value="client">Client</option>
-          </Select>
+          {!isClient ? (
+            <Select
+              id="mrf_requested_by_type"
+              label="Requested by type"
+              value={requested_by_type}
+              onChange={(e) => updateParam({ requested_by_type: e.target.value || null })}
+            >
+              <option value="">All</option>
+              <option value="internal">Internal</option>
+              <option value="client">Client</option>
+            </Select>
+          ) : null}
 
           <Select id="mrf_type" label="MRF type" value={mrf_type} onChange={(e) => updateParam({ mrf_type: e.target.value || null })}>
             <option value="">All</option>
@@ -426,16 +448,18 @@ export function MRFListPage() {
             <option value="rate_revision">Rate revision</option>
           </Select>
 
-          <Select
-            id="mrf_billing_type"
-            label="Billing type"
-            value={billing_type}
-            onChange={(e) => updateParam({ billing_type: e.target.value || null })}
-          >
-            <option value="">All</option>
-            <option value="billable">Billable</option>
-            <option value="non_billable">Non-billable</option>
-          </Select>
+          {!isClient ? (
+            <Select
+              id="mrf_billing_type"
+              label="Billing type"
+              value={billing_type}
+              onChange={(e) => updateParam({ billing_type: e.target.value || null })}
+            >
+              <option value="">All</option>
+              <option value="billable">Billable</option>
+              <option value="non_billable">Non-billable</option>
+            </Select>
+          ) : null}
         </div>
       </div>
 
