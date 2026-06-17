@@ -42,7 +42,7 @@ function statusVariant(status: string): 'success' | 'warning' | 'neutral' | 'dan
 }
 
 function fmtDate(d: string | null | undefined): string {
-  if (!d) return '—'
+  if (!d) return '-'
   try {
     return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
   } catch {
@@ -61,12 +61,6 @@ export function ClientEmployeesPage() {
   const jobRole = parseNum(params.get('job_role'))
   const status = params.get('status') ?? ''
   const page = parsePage(params.get('page'))
-
-  // Local filter state for controlled inputs (synced to URL on "Search" click)
-  const [searchInput, setSearchInput] = useState(search)
-  const [siteInput, setSiteInput] = useState(siteFilter != null ? String(siteFilter) : '')
-  const [roleInput, setRoleInput] = useState(jobRole != null ? String(jobRole) : '')
-  const [statusInput, setStatusInput] = useState(status)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -134,21 +128,17 @@ export function ClientEmployeesPage() {
     }
   }, [status, jobRole, search, page])
 
-  function applyFilters() {
-    const p = new URLSearchParams()
-    if (searchInput.trim()) p.set('search', searchInput.trim())
-    if (siteInput) p.set('site', siteInput)
-    if (roleInput) p.set('job_role', roleInput)
-    if (statusInput) p.set('status', statusInput)
-    p.set('page', '1')
+  function updateParam(next: Record<string, string | null>) {
+    const p = new URLSearchParams(params)
+    Object.entries(next).forEach(([k, v]) => {
+      if (v == null || v === '') p.delete(k)
+      else p.set(k, v)
+    })
+    p.delete('page')
     setParams(p, { replace: true })
   }
 
   function clearFilters() {
-    setSearchInput('')
-    setSiteInput('')
-    setRoleInput('')
-    setStatusInput('')
     setParams(new URLSearchParams(), { replace: true })
   }
 
@@ -158,7 +148,7 @@ export function ClientEmployeesPage() {
     setParams(p, { replace: true })
   }
 
-  const hasActiveFilters = search || siteFilter != null || jobRole != null || status
+  const hasActiveFilters = !!(search || siteFilter != null || jobRole != null || status)
 
   const roleNameById = useMemo(() => {
     const m = new Map<number, string>()
@@ -173,9 +163,9 @@ export function ClientEmployeesPage() {
 
   function currentSiteLabel(emp: EmployeeRow): string {
     const dep = deploymentByEmployee.get(emp.id)
-    if (!dep) return '—'
+    if (!dep) return '-'
     const site = dep.site_name?.trim() || `Site #${dep.site}`
-    return dep.job_role_name?.trim() ? `${site} · ${dep.job_role_name}` : site
+    return dep.job_role_name?.trim() ? `${site} - ${dep.job_role_name}` : site
   }
 
   return (
@@ -185,36 +175,69 @@ export function ClientEmployeesPage() {
         <p className="text-sm text-app-secondary">Employees currently deployed at your sites.</p>
       </div>
 
-      <div className="flex flex-col gap-3 rounded-panel border border-app-border bg-app-surface p-3 shadow-panel">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-subtle" aria-hidden />
-          <input
-            type="search"
-            placeholder="Search code, name, phone, email..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
-            className="w-full rounded-panel border border-app-border bg-app-muted py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-          />
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex-1">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-app-subtle">Filters</p>
+            <div className="relative">
+              <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-app-subtle">
+                <Search className="h-4 w-4" aria-hidden />
+              </div>
+              <input
+                value={search}
+                onChange={(e) => updateParam({ search: e.target.value })}
+                placeholder="Search code, name, phone, email..."
+                className="min-h-10 w-full rounded-panel border border-app-border bg-app-surface pl-10 pr-3 text-sm text-app-text shadow-panel placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                aria-label="Search employees"
+              />
+            </div>
+          </div>
+          <div className="flex shrink-0 justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-9 px-2 text-sm text-app-secondary"
+              onClick={clearFilters}
+              disabled={!hasActiveFilters}
+            >
+              Clear
+            </Button>
+          </div>
         </div>
+
         <div className="grid gap-3 sm:grid-cols-3">
-          <Select id="emp_site" label="Site" value={siteInput} onChange={(e) => setSiteInput(e.target.value)}>
-            <option value="">Any site</option>
+          <Select
+            id="emp_site"
+            label="Site"
+            value={siteFilter != null ? String(siteFilter) : ''}
+            onChange={(e) => updateParam({ site: e.target.value || null })}
+          >
+            <option value="">All</option>
             {sites.map((s) => (
               <option key={s.id} value={String(s.id)}>
                 {s.name}
               </option>
             ))}
           </Select>
-          <Select id="emp_role" label="Job role" value={roleInput} onChange={(e) => setRoleInput(e.target.value)}>
-            <option value="">Any role</option>
+          <Select
+            id="emp_role"
+            label="Job role"
+            value={jobRole != null ? String(jobRole) : ''}
+            onChange={(e) => updateParam({ job_role: e.target.value || null })}
+          >
+            <option value="">All</option>
             {roles.map((r) => (
               <option key={r.id} value={String(r.id)}>
                 {r.name}
               </option>
             ))}
           </Select>
-          <Select id="emp_status" label="Status" value={statusInput} onChange={(e) => setStatusInput(e.target.value)}>
+          <Select
+            id="emp_status"
+            label="Status"
+            value={status}
+            onChange={(e) => updateParam({ status: e.target.value || null })}
+          >
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value || 'any'} value={o.value}>
                 {o.label}
@@ -222,29 +245,10 @@ export function ClientEmployeesPage() {
             ))}
           </Select>
         </div>
-        <div className="flex items-center justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            className="min-h-9 px-3 text-sm"
-            onClick={clearFilters}
-            disabled={!hasActiveFilters && !searchInput && !siteInput && !roleInput && !statusInput}
-          >
-            Clear
-          </Button>
-          <Button
-            type="button"
-            className="min-h-9 px-4 text-sm"
-            onClick={applyFilters}
-            disabled={loading}
-          >
-            Search
-          </Button>
-        </div>
       </div>
 
       {error ? <ErrorState message={error} /> : null}
-      {loading ? <Spinner label="Loading employees…" /> : null}
+      {loading ? <Spinner label="Loading employees..." /> : null}
       {!loading && !error && visibleRows.length === 0 ? (
         <EmptyState title="No deployed employees yet." description="Employees deployed at your sites will appear here." />
       ) : null}
@@ -272,10 +276,10 @@ export function ClientEmployeesPage() {
                     <TD className="py-2 text-xs text-app-secondary">
                       {emp.phone ? <p className="font-mono">{emp.phone}</p> : null}
                       {emp.email ? <p>{emp.email}</p> : null}
-                      {!emp.phone && !emp.email ? <span className="text-app-subtle">—</span> : null}
+                      {!emp.phone && !emp.email ? <span className="text-app-subtle">-</span> : null}
                     </TD>
                     <TD className="py-2 text-xs">
-                      {emp.job_role != null ? roleNameById.get(emp.job_role) ?? `Role #${emp.job_role}` : '—'}
+                      {emp.job_role != null ? roleNameById.get(emp.job_role) ?? `Role #${emp.job_role}` : '-'}
                     </TD>
                     <TD className="py-2 text-xs text-app-secondary">{currentSiteLabel(emp)}</TD>
                     <TD className="py-2">
@@ -303,14 +307,14 @@ export function ClientEmployeesPage() {
                   </Badge>
                 </div>
                 <div className="mt-2 text-xs text-app-secondary">
-                  {emp.job_role != null ? roleNameById.get(emp.job_role) ?? `Role #${emp.job_role}` : '—'}
-                  {emp.joined_on ? ` · Joined ${fmtDate(emp.joined_on)}` : null}
+                  {emp.job_role != null ? roleNameById.get(emp.job_role) ?? `Role #${emp.job_role}` : '-'}
+                  {emp.joined_on ? ` - Joined ${fmtDate(emp.joined_on)}` : null}
                 </div>
                 <div className="mt-1 text-xs text-app-subtle">Site: {currentSiteLabel(emp)}</div>
                 {(emp.phone || emp.email) ? (
                   <div className="mt-1 text-xs text-app-subtle">
                     {emp.phone ? <span className="font-mono">{emp.phone}</span> : null}
-                    {emp.phone && emp.email ? ' · ' : null}
+                    {emp.phone && emp.email ? ' - ' : null}
                     {emp.email ? <span>{emp.email}</span> : null}
                   </div>
                 ) : null}
@@ -321,7 +325,7 @@ export function ClientEmployeesPage() {
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-app-subtle">
               {typeof count === 'number' ? `${count} employees` : `${visibleRows.length} employees`}
-              {siteFilter != null ? <span> · site filter applies to this page</span> : null}
+              {siteFilter != null ? <span> - site filter applies to this page</span> : null}
             </p>
             <div className="flex items-center gap-2">
               <Button
