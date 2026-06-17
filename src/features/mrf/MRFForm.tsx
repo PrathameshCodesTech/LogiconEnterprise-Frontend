@@ -98,6 +98,7 @@ export function MRFForm({
   formId,
   mode,
   initialMRF,
+  createMode,
   siteOptions,
   departmentOptions,
   departmentsLoading,
@@ -111,6 +112,8 @@ export function MRFForm({
   formId: string
   mode: 'create' | 'edit'
   initialMRF?: MRFRow | null
+  /** For new MRFs: 'billable' for client/site MRF, 'internal' for internal department MRF */
+  createMode?: 'billable' | 'internal' | null
   siteOptions: SiteOption[]
   departmentOptions: DepartmentOption[]
   departmentsLoading?: boolean
@@ -123,12 +126,39 @@ export function MRFForm({
 }) {
   const me = useAuthStore((s) => s.me)
   const clientFacingRequester = isClientFacingUser(me)
-  const [values, setValues] = useState<MRFFormValues>(() =>
-    normalizeClientRequestedValues({
+
+  // Internal mode: createMode='internal' for new MRFs, or existing MRF has non_billable and no site
+  const isInternalMode = createMode === 'internal' || (initialMRF?.billing_type === 'non_billable' && (initialMRF.site == null || initialMRF.site === 0))
+
+  // User must have department assigned for internal MRF
+  const userHasDepartment = me?.department != null && me.department > 0
+  const userDepartmentMissing = isInternalMode && !userHasDepartment
+
+  const [values, setValues] = useState<MRFFormValues>(() => {
+    // For internal mode, pre-set billing_type and use user's department
+    if (isInternalMode && mode === 'create') {
+      return normalizeClientRequestedValues({
+        site: '', // No site for internal
+        requested_by_type: 'internal' as RequestedByType,
+        mrf_type: 'new_hiring' as MRFType,
+        billing_type: 'non_billable' as BillingType,
+        requesting_department: me?.department != null ? String(me.department) : '',
+        required_department: me?.department != null ? String(me.department) : '',
+        department: '',
+        required_by_date: '',
+        reason: '',
+        client_visible: false,
+        budget_plan: '',
+        ...clientFieldsFromRow(null),
+      })
+    }
+
+    // Standard flow for billable or editing existing MRF
+    return normalizeClientRequestedValues({
       site: initialMRF?.site != null ? String(initialMRF.site) : '',
       requested_by_type: clientFacingRequester ? 'client' : ((initialMRF?.requested_by_type ?? 'internal') as RequestedByType),
       mrf_type: (initialMRF?.mrf_type ?? 'new_hiring') as MRFType,
-      billing_type: (initialMRF?.billing_type ?? 'billable') as BillingType,
+      billing_type: createMode === 'billable' ? 'billable' : ((initialMRF?.billing_type ?? 'billable') as BillingType),
       requesting_department:
         initialMRF?.requesting_department != null && initialMRF.requesting_department !== undefined
           ? String(initialMRF.requesting_department)
@@ -143,8 +173,8 @@ export function MRFForm({
       client_visible: initialMRF?.client_visible ?? false,
       budget_plan: initialMRF?.budget_plan != null ? String(initialMRF.budget_plan) : '',
       ...clientFieldsFromRow(initialMRF),
-    }),
-  )
+    })
+  })
 
   useEffect(() => {
     if (!clientFacingRequester) return
@@ -159,7 +189,11 @@ export function MRFForm({
     })
   }, [values.requested_by_type])
 
-  const siteError = useMemo(() => (values.site ? null : 'Site is required.'), [values.site])
+  // Site is required for billable MRFs, not for internal mode
+  const siteError = useMemo(() => {
+    if (isInternalMode) return null // No site needed for internal MRFs
+    return values.site ? null : 'Site is required.'
+  }, [values.site, isInternalMode])
   const requiredByError = useMemo(() => {
     if (!values.required_by_date) return null
     return isPastDate(values.required_by_date) ? 'Required by date cannot be in the past.' : null
@@ -175,12 +209,14 @@ export function MRFForm({
     [values, isNonBillable],
   )
   // Required department is mandatory for non-billable MRFs
+  // For internal mode, department is auto-set from user so no error needed
   const requiredDepartmentError = useMemo(() => {
+    if (isInternalMode) return null // Department is auto-set from user
     if (isNonBillable && !values.required_department) {
       return 'Required department is mandatory for non-billable MRF.'
     }
     return null
-  }, [isNonBillable, values.required_department])
+  }, [isNonBillable, values.required_department, isInternalMode])
 
   const budgetHelperCopy = isBillable
     ? isClientMrfUi
@@ -323,7 +359,8 @@ export function MRFForm({
     !lookupError &&
     !requiredDepartmentError &&
     !internalBudgetBlocking &&
-    !internalBudgetLoading
+    !internalBudgetLoading &&
+    !userDepartmentMissing
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -331,10 +368,19 @@ export function MRFForm({
     await onSubmit(normalizeClientRequestedValues(values))
   }
 
+  // Block internal MRF creation if user has no department
+  if (userDepartmentMissing) {
+    return (
+      <form id={formId} className="space-y-4">
+        <ErrorState message="Your user account is not assigned to a department. Ask admin to assign a department before raising internal MRF." />
+      </form>
+    )
+  }
+
   return (
     <form id={formId} onSubmit={handleSubmit} className="space-y-4">
       {errorMessage ? <ErrorState message={errorMessage} /> : null}
-      {lookupError ? <ErrorState message={`Site lookup failed. Create/Edit is disabled. ${lookupError}`} /> : null}
+      {lookupError && !isInternalMode ? <ErrorState message={`Site lookup failed. Create/Edit is disabled. ${lookupError}`} /> : null}
       {!isClientMrfUi && departmentLookupError ? (
         <ErrorState message={`Department lookup failed. Department selects are disabled. ${departmentLookupError}`} />
       ) : null}
@@ -362,50 +408,92 @@ export function MRFForm({
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {!isClientMrfUi ? (
-          <Select
-            id="mrf_billing_type"
-            label="Billing type"
-            value={values.billing_type}
-            onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
-            disabled={submitting}
-          >
-            {BILLING_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        ) : null}
-        {!isClientMrfUi ? (
-          <Select
-            id="mrf_type"
-            label="MRF type"
-            value={values.mrf_type}
-            onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
-            disabled={submitting}
-          >
-            {mrfTypeOptions.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        ) : null}
-      </div>
+      {/* Internal department request - read-only department card */}
+      {isInternalMode ? (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-status-warning/30 bg-gradient-to-r from-status-warning/5 to-status-warning/10 px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-status-warning">Request type</span>
+            <span className="text-sm font-bold text-app-text">Internal department</span>
+          </div>
+          <div className="h-4 w-px bg-status-warning/30" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-status-warning">Billing</span>
+            <span className="text-sm font-bold text-app-text">Non-billable</span>
+          </div>
+          <div className="h-4 w-px bg-status-warning/30" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-status-warning">Department</span>
+            <span className="text-sm font-bold text-app-text">{me?.department_name ?? `#${me?.department}`}</span>
+          </div>
+          <span className="ml-auto rounded-full bg-status-warning px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm">
+            Auto
+          </span>
+        </div>
+      ) : null}
+
+      {/* Billing type and MRF type dropdowns - hidden for internal mode */}
+      {!isInternalMode ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {!isClientMrfUi ? (
+            <Select
+              id="mrf_billing_type"
+              label="Billing type"
+              value={values.billing_type}
+              onChange={(e) => setValues((v) => ({ ...v, billing_type: e.target.value as BillingType }))}
+              disabled={submitting}
+            >
+              {BILLING_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          {!isClientMrfUi ? (
+            <Select
+              id="mrf_type"
+              label="MRF type"
+              value={values.mrf_type}
+              onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
+              disabled={submitting}
+            >
+              {mrfTypeOptions.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+        </div>
+      ) : (
+        <Select
+          id="mrf_type"
+          label="MRF type"
+          value={values.mrf_type}
+          onChange={(e) => setValues((v) => ({ ...v, mrf_type: e.target.value as MRFType }))}
+          disabled={submitting}
+        >
+          {mrfTypeOptions.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </Select>
+      )}
 
       <p className="text-sm font-semibold text-app-text">
-        {isBillable ? 'Client manpower request' : 'Internal hiring request'}
+        {isInternalMode ? 'Internal department hiring request' : (isBillable ? 'Client manpower request' : 'Internal hiring request')}
       </p>
 
-      <div className="space-y-1">
-        <Select
-          id="mrf_site"
-          label="Site"
-          value={values.site}
-          onChange={(e) => setValues((v) => ({ ...v, site: e.target.value }))}
-          disabled={submitting || !!lookupError}
+      {/* Site dropdown - hidden for internal mode */}
+      {!isInternalMode ? (
+        <div className="space-y-1">
+          <Select
+            id="mrf_site"
+            label="Site"
+            value={values.site}
+            onChange={(e) => setValues((v) => ({ ...v, site: e.target.value }))}
+            disabled={submitting || !!lookupError}
           error={siteError ?? undefined}
         >
           <option value="">Select a site...</option>
@@ -418,9 +506,11 @@ export function MRFForm({
         {isNonBillable ? (
           <p className="text-xs text-app-subtle">Site/cost center associated with the internal request.</p>
         ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      {!isClientMrfUi ? (
+      {/* Department dropdowns - hidden for internal mode (uses user's department) */}
+      {!isClientMrfUi && !isInternalMode ? (
         <div className="space-y-1">
           <Select
             id="mrf_requesting_department"
@@ -439,11 +529,11 @@ export function MRFForm({
           <p className="text-xs text-app-subtle">
             Optional. If blank, backend uses your user department when creating.
           </p>
-          {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments…</p> : null}
+          {departmentsLoading ? <p className="text-xs text-app-subtle">Loading departments...</p> : null}
         </div>
       ) : null}
 
-      {!isClientMrfUi ? (
+      {!isClientMrfUi && !isInternalMode ? (
         <div className="space-y-1">
           <Select
             id="mrf_required_department"
@@ -659,8 +749,13 @@ export function mrfFormValuesToWritePayload(values: MRFFormValues, mode: 'create
   }
 
   const bp = normalized.budget_plan.trim()
+
+  // For non-billable internal MRFs: site can be null (internal department request)
+  const isInternalNonBillable = normalized.billing_type === 'non_billable' && !normalized.site.trim()
+  const siteValue = isInternalNonBillable ? null : (normalized.site.trim() ? Number(normalized.site) : null)
+
   return {
-    site: Number(normalized.site),
+    site: siteValue,
     requested_by_type: normalized.requested_by_type,
     required_by_date: normalized.required_by_date || null,
     reason: normalized.reason,

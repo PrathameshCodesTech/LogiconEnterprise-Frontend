@@ -181,6 +181,13 @@ export interface RankedCandidatePoolParams {
   max_experience?: string | number
   location?: string
   page?: number
+  // Additional filters for parity
+  search?: string
+  document_type?: string
+  source_type?: string
+  target_job_role?: number
+  availability_status?: string
+  journey_status?: string
 }
 
 export async function getRankedCandidatePool(

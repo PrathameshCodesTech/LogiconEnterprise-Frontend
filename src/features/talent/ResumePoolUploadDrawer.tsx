@@ -15,7 +15,10 @@ import { Drawer } from '@/components/ui/Drawer'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { HIRING_LANE_OPTIONS, hiringLaneLabel } from '@/features/talent/talentLabels'
 import type { ExcelImportResponse, ResumeImportBatch } from '@/features/talent/types'
+
+type HiringLaneValue = 'client_billable' | 'internal_non_billable' | ''
 
 type UploadMode = 'resumes' | 'excel'
 
@@ -115,6 +118,7 @@ export function ResumePoolUploadDrawer({
   onClose: () => void
   onSuccess?: () => void
 }) {
+  const [hiringLane, setHiringLane] = useState<HiringLaneValue>('')
   const [mode, setMode] = useState<UploadMode>('resumes')
   const [roleId, setRoleId] = useState('')
   const [resumeFiles, setResumeFiles] = useState<File[]>([])
@@ -134,6 +138,7 @@ export function ResumePoolUploadDrawer({
   onSuccessRef.current = onSuccess
 
   const reset = useCallback(() => {
+    setHiringLane('')
     setMode('resumes')
     setRoleId('')
     setResumeFiles([])
@@ -146,14 +151,23 @@ export function ResumePoolUploadDrawer({
     terminalNotifiedRef.current = false
   }, [])
 
+  // Reset form when drawer opens
   useEffect(() => {
     if (!open) return
     reset()
+  }, [open, reset])
+
+  // Load roles filtered by hiring lane
+  useEffect(() => {
+    if (!open || !hiringLane) {
+      setRoles([])
+      return
+    }
     let cancelled = false
     setRolesLoading(true)
     void (async () => {
       try {
-        const res = await listJobRoles({ is_active: true, page: 1 })
+        const res = await listJobRoles({ is_active: true, hiring_lane: hiringLane, page: 1 })
         if (!cancelled) setRoles(res.items)
       } catch {
         if (!cancelled) setRoles([])
@@ -164,7 +178,14 @@ export function ResumePoolUploadDrawer({
     return () => {
       cancelled = true
     }
-  }, [open, reset])
+  }, [open, hiringLane])
+
+  // Clear role when hiring lane changes
+  function handleHiringLaneChange(value: HiringLaneValue) {
+    setHiringLane(value)
+    setRoleId('')
+    setError(null)
+  }
 
   useEffect(() => {
     if (!open || !activeBatch?.id || !polling) return
@@ -210,6 +231,10 @@ export function ResumePoolUploadDrawer({
 
   async function submit() {
     setError(null)
+    if (!hiringLane) {
+      setError('Select a hiring category before uploading.')
+      return
+    }
     const role = Number(roleId)
     if (!roleId || !Number.isFinite(role)) {
       setError('Select a mapped role before uploading.')
@@ -231,7 +256,7 @@ export function ResumePoolUploadDrawer({
 
     try {
       if (mode === 'resumes') {
-        const batch = await bulkUploadResumes({ target_job_role: role, files: resumeFiles })
+        const batch = await bulkUploadResumes({ hiring_lane: hiringLane, target_job_role: role, files: resumeFiles })
         setActiveBatch(batch)
         setPolling(!TERMINAL_BATCH_STATUSES.has(batch.status))
         if (TERMINAL_BATCH_STATUSES.has(batch.status)) {
@@ -239,7 +264,7 @@ export function ResumePoolUploadDrawer({
           onSuccess?.()
         }
       } else if (excelFile) {
-        const res = await excelImportCandidates({ target_job_role: role, file: excelFile })
+        const res = await excelImportCandidates({ hiring_lane: hiringLane, target_job_role: role, file: excelFile })
         setExcelResult(summarizeExcel(res))
         onSuccess?.()
       }
@@ -294,6 +319,7 @@ export function ResumePoolUploadDrawer({
           <ExcelResultPanel
             result={excelResult}
             roleName={selectedRole?.name}
+            hiringLaneValue={hiringLane}
             onUploadMore={() => {
               setExcelResult(null)
               setExcelFile(null)
@@ -307,13 +333,30 @@ export function ResumePoolUploadDrawer({
         ) : (
           <>
             <Select
+              id="rpu_lane"
+              label="Hiring category *"
+              value={hiringLane}
+              onChange={(e) => handleHiringLaneChange(e.target.value as HiringLaneValue)}
+              disabled={submitting}
+            >
+              <option value="">Select category</option>
+              {HIRING_LANE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+
+            <Select
               id="rpu_role"
-              label="Mapped role"
+              label="Mapped role *"
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
-              disabled={submitting || rolesLoading}
+              disabled={submitting || rolesLoading || !hiringLane}
             >
-              <option value="">{rolesLoading ? 'Loading roles…' : 'Select a role'}</option>
+              <option value="">
+                {!hiringLane ? 'Select category first' : rolesLoading ? 'Loading roles...' : 'Select a role'}
+              </option>
               {roles.map((r) => (
                 <option key={r.id} value={String(r.id)}>
                   {r.name}
@@ -727,7 +770,10 @@ function BatchResultPanel({
             )}
             <div>
               <p className="text-sm font-semibold text-app-heading">{statusText}</p>
-              {roleName ? <p className="text-xs text-app-secondary">{roleName}</p> : null}
+              <p className="text-xs text-app-secondary">
+                {batch.hiring_lane_label ?? hiringLaneLabel(batch.hiring_lane)}
+                {roleName ? ` · ${roleName}` : null}
+              </p>
             </div>
           </div>
           {!terminal ? (
@@ -847,11 +893,13 @@ function BatchResultPanel({
 function ExcelResultPanel({
   result,
   roleName,
+  hiringLaneValue,
   onUploadMore,
   onRefreshPool,
 }: {
   result: ExcelResultSummary
   roleName?: string
+  hiringLaneValue?: string
   onUploadMore: () => void
   onRefreshPool: () => void
 }) {
@@ -865,7 +913,10 @@ function ExcelResultPanel({
           </div>
           <div>
             <p className="text-sm font-semibold text-app-heading">Excel import complete</p>
-            {roleName ? <p className="text-xs text-app-secondary">{roleName}</p> : null}
+            <p className="text-xs text-app-secondary">
+              {hiringLaneLabel(hiringLaneValue)}
+              {roleName ? ` · ${roleName}` : null}
+            </p>
           </div>
         </div>
 

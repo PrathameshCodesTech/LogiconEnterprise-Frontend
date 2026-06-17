@@ -339,6 +339,71 @@ export function isJourneyStatusBlocked(status?: string | null): boolean {
   ].includes(s)
 }
 
+// ─── Availability Status ─────────────────────────────────────────────────────
+
+export const AVAILABILITY_STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'All availability' },
+  { value: 'available_now', label: 'Available now' },
+  { value: 'available_from_date', label: 'Available from date' },
+  { value: 'currently_deployed', label: 'Currently deployed' },
+  { value: 'notice_period', label: 'Notice period' },
+  { value: 'not_available', label: 'Not available' },
+  { value: 'unknown', label: 'Unknown' },
+]
+
+const AVAILABILITY_STATUS_LABELS: Record<string, string> = {
+  available_now: 'Available now',
+  available_from_date: 'Available from date',
+  currently_deployed: 'Currently deployed',
+  notice_period: 'Notice period',
+  not_available: 'Not available',
+  unknown: 'Unknown',
+}
+
+export function availabilityStatusLabel(status: string | null | undefined): string {
+  if (!status) return 'Unknown'
+  return AVAILABILITY_STATUS_LABELS[status] ?? status.replace(/_/g, ' ')
+}
+
+export function availabilityStatusVariant(
+  status: string | null | undefined,
+): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+  if (!status) return 'neutral'
+  const s = status.toLowerCase()
+  if (s === 'available_now') return 'success'
+  if (s === 'available_from_date' || s === 'notice_period') return 'info'
+  if (s === 'currently_deployed') return 'warning'
+  if (s === 'not_available') return 'danger'
+  return 'neutral'
+}
+
+// ─── Hiring Lane (Category) ──────────────────────────────────────────────────
+
+export const HIRING_LANE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'client_billable', label: 'Client site manpower' },
+  { value: 'internal_non_billable', label: 'Internal staff hiring' },
+]
+
+export const HIRING_LANE_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'All categories' },
+  { value: 'client_billable', label: 'Client site manpower' },
+  { value: 'internal_non_billable', label: 'Internal staff hiring' },
+]
+
+export function hiringLaneLabel(value?: string | null): string {
+  if (value === 'client_billable') return 'Client site manpower'
+  if (value === 'internal_non_billable') return 'Internal staff hiring'
+  return 'Unassigned'
+}
+
+export function hiringLaneVariant(
+  value?: string | null,
+): 'info' | 'warning' | 'neutral' {
+  if (value === 'client_billable') return 'info'
+  if (value === 'internal_non_billable') return 'warning'
+  return 'neutral'
+}
+
 export const JOURNEY_STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All journey statuses' },
   { value: 'unknown', label: 'Unknown' },

@@ -494,7 +494,10 @@ export function MRFDetailPage() {
   if (error) return <ErrorState message={error} />
   if (!row) return <EmptyState title="MRF not found" description="This request may have been removed." />
 
-  const siteLabel = siteNameById.get(row.site) ?? `Site #${row.site}`
+  const isInternalMrf = row.billing_type === 'non_billable' && (row.site == null || row.site === 0)
+  const siteLabel = isInternalMrf
+    ? 'Internal department request'
+    : (row.site != null ? siteNameById.get(row.site) ?? `Site #${row.site}` : '-')
 
   const pageHeader = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -721,19 +724,19 @@ export function MRFDetailPage() {
               <dt className="text-app-subtle">Requesting department</dt>
               <dd className="max-w-[60%] text-right font-medium text-app-text">
                 {row.requesting_department_name?.trim() ||
-                  (row.requesting_department != null ? `#${row.requesting_department}` : '�')}
+                  (row.requesting_department != null ? `#${row.requesting_department}` : '-')}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Required department</dt>
               <dd className="max-w-[60%] text-right font-medium text-app-text">
                 {row.required_department_name?.trim() ||
-                  (row.required_department != null ? `#${row.required_department}` : '�')}
+                  (row.required_department != null ? `#${row.required_department}` : '-')}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Legacy department text</dt>
-              <dd className="max-w-[60%] text-right text-app-text">{row.department?.trim() ? row.department : '�'}</dd>
+              <dd className="max-w-[60%] text-right text-app-text">{row.department?.trim() ? row.department : '-'}</dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-app-subtle">Required by</dt>
@@ -795,7 +798,7 @@ export function MRFDetailPage() {
             source={row}
             workflowStatus={row.workflow_status}
             clientName={undefined}
-            siteName={siteNameById.get(row.site) ?? siteRowForMrf?.name}
+            siteName={row.site != null ? siteNameById.get(row.site) ?? siteRowForMrf?.name : undefined}
             departmentName={row.required_department_name}
           />
         </div>
@@ -903,4 +906,3 @@ export function MRFDetailPage() {
     </div>
   )
 }
-

@@ -39,6 +39,8 @@ import {
   documentTypeLabel,
   documentTypeShort,
   hiringApplicationStatusLabel,
+  hiringLaneLabel,
+  hiringLaneVariant,
   poolResumeStatusLabel,
   poolResumeStatusVariant,
   sourceTypeLabel,
@@ -240,6 +242,11 @@ export function CandidateDetailPage() {
               )}
               {row.lifecycle_status && (
                 <Badge variant="neutral">{row.lifecycle_status.replace(/_/g, ' ')}</Badge>
+              )}
+              {row.hiring_lane && (
+                <Badge variant={hiringLaneVariant(row.hiring_lane)} className="text-[10px]">
+                  {hiringLaneLabel(row.hiring_lane)}
+                </Badge>
               )}
             </div>
           </div>

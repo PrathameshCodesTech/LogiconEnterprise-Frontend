@@ -51,8 +51,10 @@ import { SalesLeadListPage } from '@/features/sales/SalesLeadListPage'
 import { SalesLeadDetailPage } from '@/features/sales/SalesLeadDetailPage'
 import { SiteSurveyWorkspacePage } from '@/features/sales/SiteSurveyWorkspacePage'
 import { SalesProposalWorkspacePage } from '@/features/sales/SalesProposalWorkspacePage'
+import { ClientProposalPreviewPage } from '@/features/sales/ClientProposalPreviewPage'
 import { PublicProposalResponsePage } from '@/features/sales/PublicProposalResponsePage'
 import { OperationsSurveyQueuePage } from '@/features/sales/OperationsSurveyQueuePage'
+import { AssetVaultPage } from '@/features/integrations/AssetVaultPage'
 import { CAP, DEPLOYMENT_ANY, MASTERS_ANY } from '@/lib/capabilities'
 
 // ─── Route path constants ─────────────────────────────────────────────────────
@@ -321,6 +323,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'sales/proposals/:id/preview',
+            element: (
+              <RequireCapability anyOf={[CAP.SALES_PROPOSAL_READ]}>
+                <ClientProposalPreviewPage />
+              </RequireCapability>
+            ),
+          },
+          {
             path: 'sales/operations-surveys',
             element: (
               <RequireCapability anyOf={[CAP.SALES_SURVEY_READ]}>
@@ -389,7 +399,7 @@ export const router = createBrowserRouter([
           {
             path: 'hiring/interview-assignments',
             element: (
-              <RequireCapability anyOf={[CAP.INTERVIEW_READ]}>
+              <RequireCapability anyOf={[CAP.INTERVIEW_ASSIGNMENT_READ]}>
                 <InterviewAssignmentsPage />
               </RequireCapability>
             ),
@@ -543,6 +553,14 @@ export const router = createBrowserRouter([
             element: (
               <RequireCapability anyOf={[CAP.DEPLOYMENT_READ]}>
                 <DeploymentHistoryPage />
+              </RequireCapability>
+            ),
+          },
+          {
+            path: 'asset-vault',
+            element: (
+              <RequireCapability anyOf={[CAP.ASSET_VAULT_ACCESS]}>
+                <AssetVaultPage />
               </RequireCapability>
             ),
           },

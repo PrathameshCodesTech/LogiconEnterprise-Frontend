@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, ChevronUp, ExternalLink, GitBranch, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, ExternalLink, Filter, GitBranch, RefreshCw, SendHorizontal, UserPlus } from 'lucide-react'
 import { useAuthStore } from '@/features/auth/authStore'
 import { CAP, hasAnyCapability } from '@/lib/capabilities'
 import {
@@ -11,6 +11,8 @@ import {
   sendShortlistedToClientReview,
   shortlistCandidateForDemand,
 } from '@/api/hiring'
+import type { RankedCandidatePoolParams } from '@/api/hiring'
+import { listJobRoles, type JobRoleRow } from '@/api/jobs'
 import { parseApiError } from '@/lib/apiError'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
@@ -19,7 +21,20 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
-import { hiringApplicationStatusLabel } from '@/features/talent/talentLabels'
+import {
+  hiringApplicationStatusLabel,
+  SOURCE_TYPE_FILTER_OPTIONS,
+  DOCUMENT_TYPE_FILTER_OPTIONS,
+  JOURNEY_STATUS_FILTER_OPTIONS,
+  AVAILABILITY_STATUS_FILTER_OPTIONS,
+  sourceTypeLabel,
+  sourceTypeVariant,
+  candidateJourneyStatusLabel,
+  candidateJourneyStatusVariant,
+  isJourneyStatusBlocked,
+  availabilityStatusLabel,
+  availabilityStatusVariant,
+} from '@/features/talent/talentLabels'
 import { CandidateMatchScorecard } from '@/features/hiring/CandidateMatchScorecard'
 import { HiringDemandJourney } from '@/features/hiring/HiringJourney'
 import {
@@ -144,19 +159,31 @@ function Stat({
 // ─── Pool filters ─────────────────────────────────────────────────────────────
 
 interface PoolFilters {
+  search: string
   skills: string
   location: string
   minExp: string
   maxExp: string
   minScore: string
+  documentType: string
+  sourceType: string
+  targetJobRole: number | ''
+  availabilityStatus: string
+  journeyStatus: string
 }
 
 const BLANK_POOL_FILTERS: PoolFilters = {
+  search: '',
   skills: '',
   location: '',
   minExp: '',
   maxExp: '',
   minScore: '',
+  documentType: '',
+  sourceType: '',
+  targetJobRole: '',
+  availabilityStatus: '',
+  journeyStatus: '',
 }
 
 // ─── CandidatePoolTab ─────────────────────────────────────────────────────────
@@ -183,18 +210,38 @@ function CandidatePoolTab({
   const [shortlistSuccess, setShortlistSuccess] = useState<Record<number, boolean>>({})
   const [justShortlisted, setJustShortlisted] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [jobRoles, setJobRoles] = useState<JobRoleRow[]>([])
+
+  // Load job roles for the mapped role filter
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await listJobRoles({ is_active: true })
+        setJobRoles(res.items)
+      } catch {
+        // Silently ignore - role filter will just be empty
+      }
+    })()
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const params: Record<string, string | number> = { ranked: 'true' }
+      const params: RankedCandidatePoolParams = { ranked: 'true' }
+      if (filters.search.trim()) params.search = filters.search.trim()
       if (filters.skills.trim()) params.skills = filters.skills.trim()
       if (filters.location.trim()) params.location = filters.location.trim()
       if (filters.minExp.trim()) params.min_experience = filters.minExp.trim()
       if (filters.maxExp.trim()) params.max_experience = filters.maxExp.trim()
       if (filters.minScore.trim()) params.min_score = filters.minScore.trim()
-      const res = await getRankedCandidatePool(demandId, params as Parameters<typeof getRankedCandidatePool>[1])
+      if (filters.documentType) params.document_type = filters.documentType
+      if (filters.sourceType) params.source_type = filters.sourceType
+      if (filters.targetJobRole) params.target_job_role = filters.targetJobRole
+      if (filters.availabilityStatus) params.availability_status = filters.availabilityStatus
+      if (filters.journeyStatus) params.journey_status = filters.journeyStatus
+      const res = await getRankedCandidatePool(demandId, params)
       setRows(res.items)
       setCount(res.count)
     } catch (e: unknown) {
@@ -208,7 +255,7 @@ function CandidatePoolTab({
     void load()
   }, [load])
 
-  function setFilter(key: keyof PoolFilters, value: string) {
+  function setFilter<K extends keyof PoolFilters>(key: K, value: PoolFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -244,38 +291,138 @@ function CandidatePoolTab({
     }
   }
 
-  const inputCls =
-    'h-7 w-full rounded border border-app-border bg-app-surface px-2 text-xs text-app-text placeholder-app-muted focus:outline-none focus:ring-1 focus:ring-brand-500'
+  const selectCls =
+    'h-7 w-full rounded border border-app-border bg-app-surface px-2 text-xs text-app-text focus:outline-none focus:ring-1 focus:ring-brand-500'
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2 rounded-panel border border-app-border bg-app-surface p-3 shadow-panel">
-        <FilterField label="Required skills" value={filters.skills} onChange={(v) => setFilter('skills', v)} placeholder="e.g. electrician" />
-        <FilterField label="Preferred location" value={filters.location} onChange={(v) => setFilter('location', v)} placeholder="City or state" />
-        <FilterField label="Minimum experience" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" />
-        <FilterField label="Maximum experience" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" />
-        <FilterField label="Minimum match score (0–100)" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="e.g. 70" type="number" />
-        <div className="flex items-end gap-2 ml-auto">
-          <Button
-            type="button"
-            variant="secondary"
-            className="min-h-7 gap-1 px-2 text-xs"
-            onClick={() => setFilters(BLANK_POOL_FILTERS)}
-            disabled={loading}
-          >
-            Clear
-          </Button>
-          <Button
-            type="button"
-            className="min-h-7 gap-1 px-2 text-xs"
-            onClick={() => void load()}
-            disabled={loading}
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
-            Refresh
-          </Button>
+      {/* Context: Demand role */}
+      <p className="text-xs text-app-secondary">
+        Matching against: <span className="font-medium text-app-text">{demand.job_role_name ?? `Role #${demand.job_role_id}`}</span>
+        {demandIsInternalNonBillable(demand)
+          ? (demand.required_department_name ? ` for ${demand.required_department_name}` : '')
+          : (demand.site_name ? ` at ${demand.site_name}` : '')}
+      </p>
+
+      <div className="rounded-panel border border-app-border bg-app-surface p-3 shadow-panel space-y-3">
+        {/* Primary filters */}
+        <div className="flex flex-wrap items-end gap-2">
+          <FilterField label="Search" value={filters.search} onChange={(v) => setFilter('search', v)} placeholder="Name, phone, or keyword" className="min-w-[160px]" />
+          <FilterField label="Skills" value={filters.skills} onChange={(v) => setFilter('skills', v)} placeholder="e.g. electrician" />
+          <FilterField label="Location" value={filters.location} onChange={(v) => setFilter('location', v)} placeholder="City or state" />
+          <FilterField label="Min exp" value={filters.minExp} onChange={(v) => setFilter('minExp', v)} placeholder="e.g. 2" type="number" className="min-w-[80px]" />
+          <FilterField label="Max exp" value={filters.maxExp} onChange={(v) => setFilter('maxExp', v)} placeholder="e.g. 10" type="number" className="min-w-[80px]" />
+          <FilterField label="Min score" value={filters.minScore} onChange={(v) => setFilter('minScore', v)} placeholder="0-100" type="number" className="min-w-[80px]" />
+          <div className="flex items-end gap-2 ml-auto">
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-7 gap-1 px-2 text-xs"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              <Filter className="h-3.5 w-3.5" aria-hidden />
+              {showAdvanced ? 'Hide filters' : 'More filters'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-7 gap-1 px-2 text-xs"
+              onClick={() => setFilters(BLANK_POOL_FILTERS)}
+              disabled={loading}
+            >
+              Clear
+            </Button>
+            <Button
+              type="button"
+              className="min-h-7 gap-1 px-2 text-xs"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />
+              Search
+            </Button>
+          </div>
         </div>
-        <p className="w-full text-xs text-app-subtle">
+
+        {/* Advanced filters */}
+        {showAdvanced && (
+          <div className="border-t border-app-border pt-3">
+            <div className="flex flex-wrap items-end gap-2">
+              {/* Document type */}
+              <div className="flex flex-col gap-0.5 min-w-[120px]">
+                <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">Document type</label>
+                <select
+                  className={selectCls}
+                  value={filters.documentType}
+                  onChange={(e) => setFilter('documentType', e.target.value)}
+                >
+                  {DOCUMENT_TYPE_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Source type */}
+              <div className="flex flex-col gap-0.5 min-w-[120px]">
+                <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">Source type</label>
+                <select
+                  className={selectCls}
+                  value={filters.sourceType}
+                  onChange={(e) => setFilter('sourceType', e.target.value)}
+                >
+                  {SOURCE_TYPE_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Mapped role */}
+              <div className="flex flex-col gap-0.5 min-w-[140px]">
+                <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">Mapped role</label>
+                <select
+                  className={selectCls}
+                  value={filters.targetJobRole}
+                  onChange={(e) => setFilter('targetJobRole', e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">All roles</option>
+                  {jobRoles.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Availability status */}
+              <div className="flex flex-col gap-0.5 min-w-[130px]">
+                <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">Availability</label>
+                <select
+                  className={selectCls}
+                  value={filters.availabilityStatus}
+                  onChange={(e) => setFilter('availabilityStatus', e.target.value)}
+                >
+                  {AVAILABILITY_STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Journey status */}
+              <div className="flex flex-col gap-0.5 min-w-[130px]">
+                <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">Journey status</label>
+                <select
+                  className={selectCls}
+                  value={filters.journeyStatus}
+                  onChange={(e) => setFilter('journeyStatus', e.target.value)}
+                >
+                  {JOURNEY_STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <p className="text-xs text-app-subtle">
           Scores are calculated from parsed resume details and candidate profile data.
         </p>
       </div>
@@ -296,8 +443,8 @@ function CandidatePoolTab({
       {loading && rows.length === 0 ? <Spinner label="Loading ranked candidates…" /> : null}
       {!loading && !error && rows.length === 0 ? (
         <EmptyState
-          title="No candidates in pool"
-          description="Adjust filters or check back after more resumes are indexed."
+          title="No matching candidates"
+          description="Try adjusting your filters or expanding search criteria."
         />
       ) : null}
 
@@ -323,9 +470,25 @@ function CandidatePoolTab({
                 const rowErr = shortlistErrors[cid] ?? ''
                 const expanded = expandedId === cid
                 const colSpan = 7
-                void inputCls
+                const journeyBlocked = isJourneyStatusBlocked(row.candidate.journey_status)
+                const showJourneyBadge = row.candidate.journey_status && row.candidate.journey_status !== 'unknown'
                 return (
                   <Fragment key={cid}>
+                    {/* Warning for blocked journey status */}
+                    {journeyBlocked && (
+                      <TR className="bg-status-warning/5">
+                        <TD colSpan={colSpan} className="py-1.5 px-3">
+                          <div className="flex items-center gap-2 text-xs text-status-warning">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              This candidate is{' '}
+                              <strong>{candidateJourneyStatusLabel(row.candidate.journey_status, row.candidate.journey_status_label).toLowerCase()}</strong>.
+                              Shortlisting may not be appropriate.
+                            </span>
+                          </div>
+                        </TD>
+                      </TR>
+                    )}
                     <TR>
                       <TD className="py-2 text-xs text-app-subtle">{idx + 1}</TD>
                       <TD className="py-2">
@@ -339,11 +502,28 @@ function CandidatePoolTab({
                       <TD className="py-2 text-xs">{fmtExp(row.candidate.total_experience_years)}</TD>
                       <TD className="py-2 text-xs font-semibold tabular-nums">{formatMatchScore(row.score)}</TD>
                       <TD className="py-2">
-                        {row.match_status ? (
-                          <Badge variant={matchStatusBadgeVariant(row.match_status)} className="text-[11px]">
-                            {row.match_status}
-                          </Badge>
-                        ) : null}
+                        <div className="flex flex-wrap gap-1">
+                          {row.match_status ? (
+                            <Badge variant={matchStatusBadgeVariant(row.match_status)} className="text-[11px]">
+                              {row.match_status}
+                            </Badge>
+                          ) : null}
+                          {row.candidate.latest_source_type && (
+                            <Badge variant={sourceTypeVariant(row.candidate.latest_source_type)} className="text-[11px]">
+                              {sourceTypeLabel(row.candidate.latest_source_type)}
+                            </Badge>
+                          )}
+                          {showJourneyBadge && (
+                            <Badge variant={candidateJourneyStatusVariant(row.candidate.journey_status)} className="text-[11px]">
+                              {candidateJourneyStatusLabel(row.candidate.journey_status, row.candidate.journey_status_label)}
+                            </Badge>
+                          )}
+                          {row.candidate.availability_status && (
+                            <Badge variant={availabilityStatusVariant(row.candidate.availability_status)} className="text-[11px]">
+                              {availabilityStatusLabel(row.candidate.availability_status)}
+                            </Badge>
+                          )}
+                        </div>
                       </TD>
                       <TD className="py-2 text-right">
                         <div className="flex flex-col items-end gap-1">
@@ -408,15 +588,17 @@ function FilterField({
   onChange,
   placeholder,
   type,
+  className,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   placeholder?: string
   type?: string
+  className?: string
 }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-[120px]">
+    <div className={cn('flex flex-col gap-0.5 min-w-[120px]', className)}>
       <label className="text-[10px] font-medium text-app-secondary uppercase tracking-wide">{label}</label>
       <input
         type={type ?? 'text'}
@@ -555,9 +737,13 @@ function ApplicationsTab({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-xs text-app-secondary">
-          {demand.client_name?.trim() || 'Client'}
-          {demand.site_name ? ` · ${demand.site_name}` : ''}
-          {demand.job_role_name ? ` · ${demand.job_role_name}` : ''}
+          {demandIsInternalNonBillable(demand)
+            ? (demand.required_department_name?.trim() || 'Internal')
+            : (demand.client_name?.trim() || 'Client')}
+          {demandIsInternalNonBillable(demand)
+            ? ''
+            : (demand.site_name ? ` - ${demand.site_name}` : '')}
+          {demand.job_role_name ? ` - ${demand.job_role_name}` : ''}
         </p>
         <Button
           type="button"

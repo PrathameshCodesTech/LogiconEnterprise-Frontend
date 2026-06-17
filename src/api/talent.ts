@@ -34,6 +34,7 @@ export interface ListCandidatesParams {
   source_type?: string
   target_job_role?: number
   is_blacklisted?: boolean
+  hiring_lane?: string
   page?: number
 }
 
@@ -65,6 +66,7 @@ export interface ListResumesParams {
   target_job_role?: number
   target_role_source?: string
   import_batch_id?: string
+  hiring_lane?: string
   page?: number
 }
 
@@ -90,6 +92,7 @@ export async function manualResumeIntake(formData: FormData): Promise<ManualResu
 }
 
 export interface BulkUploadResumesInput {
+  hiring_lane: 'client_billable' | 'internal_non_billable'
   target_job_role: number
   files: File[]
   source_type?: string
@@ -99,6 +102,7 @@ export interface BulkUploadResumesInput {
 /** POST /api/talent/resumes/bulk-upload/ - queues async role-tagged multi-file intake */
 export async function bulkUploadResumes(input: BulkUploadResumesInput): Promise<ResumeImportBatch> {
   const fd = new FormData()
+  fd.append('hiring_lane', input.hiring_lane)
   fd.append('target_job_role', String(input.target_job_role))
   fd.append('source_type', input.source_type ?? 'bulk_upload')
   if (input.view_only_note?.trim()) fd.append('view_only_note', input.view_only_note.trim())
@@ -114,6 +118,7 @@ export interface ListResumeImportBatchesParams {
   status?: string
   document_type?: string
   source_type?: string
+  hiring_lane?: string
   created_by?: string | number
   created_from?: string
   created_to?: string
@@ -135,6 +140,7 @@ export async function getResumeImportBatch(id: number): Promise<ResumeImportBatc
 }
 
 export interface ExcelImportCandidatesInput {
+  hiring_lane: 'client_billable' | 'internal_non_billable'
   target_job_role: number
   file: File
   source_type?: string
@@ -143,6 +149,7 @@ export interface ExcelImportCandidatesInput {
 /** POST /api/talent/resumes/excel-import/ - role-tagged candidate import from CSV/XLSX */
 export async function excelImportCandidates(input: ExcelImportCandidatesInput): Promise<ExcelImportResponse> {
   const fd = new FormData()
+  fd.append('hiring_lane', input.hiring_lane)
   fd.append('target_job_role', String(input.target_job_role))
   fd.append('source_type', input.source_type ?? 'excel_import')
   fd.append('file', input.file)

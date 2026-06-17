@@ -14,6 +14,9 @@ export interface JobRoleRow {
   is_active: boolean
   created_at: string
   updated_at: string
+  // Hiring lane (category)
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_display?: string | null
 }
 
 export interface ListJobRolesParams {
@@ -21,6 +24,7 @@ export interface ListJobRolesParams {
   org?: number
   skill_category?: SkillCategory
   is_active?: boolean
+  hiring_lane?: string
   page?: number
 }
 
@@ -31,6 +35,7 @@ export interface JobRoleWriteInput {
   skill_category: SkillCategory
   is_active?: boolean
   org?: number | null
+  hiring_lane?: 'client_billable' | 'internal_non_billable'
 }
 
 /** @deprecated Prefer overload with explicit params object for pagination. */
@@ -49,6 +54,7 @@ export async function listJobRoles(
       org: normalized.org ?? undefined,
       skill_category: normalized.skill_category || undefined,
       is_active: typeof normalized.is_active === 'boolean' ? String(normalized.is_active) : undefined,
+      hiring_lane: normalized.hiring_lane || undefined,
       page: normalized.page ?? undefined,
     },
   })

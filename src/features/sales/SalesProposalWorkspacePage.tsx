@@ -1,9 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import axios from 'axios'
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Clock,
+  Download,
   FileText,
   IndianRupee,
   Lock,
@@ -14,6 +17,7 @@ import {
 import {
   cloneProposalRevision,
   convertProposalToMobilisation,
+  downloadClientProposalPdf,
   getProposalVersion,
   getSalesLead,
   listEligibleOperationsOwnersForLead,
@@ -39,6 +43,7 @@ import {
 } from '@/features/sales/salesUtils'
 import { CAP, hasAllCapabilities, hasAnyCapability } from '@/lib/capabilities'
 import { parseApiError } from '@/lib/apiError'
+import { saveBlob, parseBlobError } from '@/lib/fileDownload'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
@@ -54,6 +59,8 @@ import {
   getBreakupRoleBandStyle,
   getUnmappedBreakupLines,
 } from '@/features/sales/salesBreakupGrouping'
+import { ClientProposalDocument } from './ClientProposalDocument'
+import { clientProposalDataFromInternal } from './clientProposalDocumentData'
 import { cn } from '@/lib/cn'
 import type {
   ProposalBudgetLine,
@@ -64,7 +71,7 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type TabId = 'overview' | 'budget-lines' | 'salary-breakup' | 'approval' | 'client-response' | 'revision-history'
+type TabId = 'overview' | 'budget-lines' | 'salary-breakup' | 'approval' | 'client-response' | 'revision-history' | 'client-preview'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -73,6 +80,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'approval', label: 'Approval' },
   { id: 'client-response', label: 'Client Response' },
   { id: 'revision-history', label: 'Revision History' },
+  { id: 'client-preview', label: 'Client Preview' },
 ]
 
 const LOCKED_STATUSES = new Set([
@@ -134,21 +142,14 @@ function buildDefaultEmailSubject(proposal: ProposalVersion, lead: SalesLead): s
 }
 
 function buildDefaultEmailBody(
-  proposal: ProposalVersion,
   lead: SalesLead,
   recipientName: string,
 ): string {
   const greeting = recipientName.trim() || lead.client_contact_person?.trim() || 'there'
-  const grandTotal = formatIndianCurrency(proposal.grand_total)
   return [
     `Hello ${greeting},`,
     '',
     `Please review the commercial proposal prepared for ${lead.client_name}.`,
-    '',
-    `Proposal version: v${proposal.version_number}`,
-    `Grand total: ${grandTotal}`,
-    '',
-    'You can review the proposal and submit your response using the secure link below.',
   ].join('\n')
 }
 
@@ -170,34 +171,6 @@ function canResendProposal(proposal: ProposalVersion, canSendCap: boolean): bool
     proposal.status === 'sent_to_client' &&
     proposal.client_approval_status === 'pending'
   )
-}
-
-function getClientSendBlocker(proposal: ProposalVersion, canSendCap: boolean): string {
-  if (!canSendCap) {
-    return 'You do not have permission to send proposals to clients.'
-  }
-  if (clientHasResponded(proposal)) {
-    return 'Client has already responded. Resend is not available.'
-  }
-  if (proposal.status === 'internally_approved') {
-    return 'You do not have permission to send proposals to clients.'
-  }
-  if (proposal.status === 'sent_to_client' && proposal.client_approval_status !== 'pending') {
-    return 'Client has already responded. Resend is not available.'
-  }
-  const preSendStatuses = new Set([
-    'draft',
-    'generated',
-    'submitted_internal',
-    'pending_internal_approval',
-    'internal_approval',
-    'sales_review',
-    'budget_generated',
-  ])
-  if (preSendStatuses.has(proposal.status)) {
-    return 'Proposal must complete internal approval before it can be sent to the client.'
-  }
-  return `Proposal cannot be sent in its current status (${proposalStatusLabel(proposal.status)}).`
 }
 
 // Gmail-style input class - clean underline style
@@ -261,7 +234,7 @@ function SendToClientDrawer({
     setName(contact)
     setDays('')
     setSubject(buildDefaultEmailSubject(proposal, lead))
-    setMessage(buildDefaultEmailBody(proposal, lead, contact))
+    setMessage(buildDefaultEmailBody(lead, contact))
     setApiError(null)
     setFieldErrors({})
   }, [open, lead, proposal])
@@ -441,8 +414,40 @@ function SendToClientDrawer({
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Compose email"
             maxLength={5000}
-            className="flex-1 min-h-[280px] resize-none border-0 bg-white px-4 py-4 text-[14px] leading-relaxed text-[#202124] placeholder:text-[#5f6368] focus:outline-none dark:bg-app-surface dark:text-app-text"
+            className="flex-1 min-h-[200px] resize-none border-0 bg-white px-4 py-4 text-[14px] leading-relaxed text-[#202124] placeholder:text-[#5f6368] focus:outline-none dark:bg-app-surface dark:text-app-text"
           />
+
+          {/* System footer preview (read-only) */}
+          <div className="border-t border-[#dadce0] bg-[#f8f9fa] px-4 py-3 dark:bg-app-muted dark:border-app-border">
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#5f6368] dark:text-app-subtle">
+              System footer
+            </p>
+            <div className="rounded border border-[#dadce0] bg-white px-3 py-2.5 text-[13px] text-[#5f6368] dark:bg-app-surface dark:border-app-border dark:text-app-subtle">
+              <p className="mb-2 text-[12px] italic">
+                The system will append the secure proposal link, proposal summary, PDF download note, and expiry details.
+              </p>
+              {(proposal || lead) && (
+                <div className="mt-2 space-y-1 border-t border-dashed border-[#dadce0] pt-2 text-[12px] dark:border-app-border">
+                  {proposal?.version_number != null && (
+                    <p><span className="font-medium">Proposal version:</span> {proposal.version_number}</p>
+                  )}
+                  {lead?.client_name && (
+                    <p><span className="font-medium">Client:</span> {lead.client_name}</p>
+                  )}
+                  {proposal?.manpower_total != null && (
+                    <p><span className="font-medium">Total manpower:</span> {proposal.manpower_total}</p>
+                  )}
+                  {proposal?.grand_total && (
+                    <p><span className="font-medium">Grand total:</span> {formatIndianCurrency(proposal.grand_total)}</p>
+                  )}
+                  {days.trim() && Number(days) > 0 && (
+                    <p><span className="font-medium">Link expires in:</span> {days} days</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center justify-between border-t border-[#dadce0] bg-[#f8f9fa] px-4 py-2 dark:bg-app-muted dark:border-app-border">
             {fieldErrors.message ? (
               <p className="text-[12px] text-[#d93025]">{fieldErrors.message}</p>
@@ -452,7 +457,7 @@ function SendToClientDrawer({
               </p>
             )}
             <p className="text-[11px] text-[#5f6368] dark:text-app-subtle">
-              Secure link appended automatically
+              Write only the custom message
             </p>
           </div>
         </div>
@@ -522,6 +527,10 @@ export function SalesProposalWorkspacePage() {
     id: number
     ownerName: string
   } | null>(null)
+
+  // PDF download state
+  const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   const isLocked = proposal ? LOCKED_STATUSES.has(proposal.status) : true
   const canEdit = canUpdate && !isLocked
@@ -927,26 +936,33 @@ export function SalesProposalWorkspacePage() {
               <Table>
                 <THead>
                   <TR className="bg-slate-50 dark:bg-slate-800/50">
-                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Role / Service</TH>
-                    <TH className="py-3 px-4 text-center text-xs font-semibold uppercase tracking-wider text-app-subtle">Manpower</TH>
-                    <TH className="py-3 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">Unit Cost</TH>
-                    <TH className="py-3 px-4 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle">Total Cost</TH>
-                    <TH className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Remarks</TH>
-                    <TH className="py-3 px-4 w-16">{''}</TH>
+                    <TH className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Role / Site</TH>
+                    <TH className="py-3 px-3 text-center text-xs font-semibold uppercase tracking-wider text-app-subtle w-20">Headcount</TH>
+                    <TH className="py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-28">Ops Basis</TH>
+                    <TH className="py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-28">Sales Rate</TH>
+                    <TH className="py-3 px-3 text-right text-xs font-semibold uppercase tracking-wider text-app-subtle w-28">Total</TH>
+                    <TH className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wider text-app-subtle">Override</TH>
+                    <TH className="py-3 px-3 w-14">{''}</TH>
                   </TR>
                 </THead>
                 <TBody>
                   {budgetLines.map((row, idx) => {
                     const key = `bl-${row.id}`
+                    const isOverridden = row.is_manual_override === true
+                    // Check if override reason is required but missing
+                    const needsReason = isOverridden && !row.override_reason?.trim()
+
                     return (
                       <TR key={row.id} className={`transition-colors hover:bg-app-muted/50 ${idx % 2 === 0 ? 'bg-app-surface' : 'bg-slate-50/50 dark:bg-slate-800/20'}`}>
-                        <TD className="py-3 px-4">
+                        {/* Role / Site */}
+                        <TD className="py-3 px-3">
                           <p className="text-sm font-medium text-app-text">{row.job_role_name ?? '—'}</p>
                           {row.site_name ? (
                             <p className="text-xs text-app-subtle">{row.site_name}</p>
                           ) : null}
                         </TD>
-                        <TD className="py-2 px-4 text-center">
+                        {/* Headcount */}
+                        <TD className="py-2 px-3 text-center">
                           {canEdit ? (
                             <input
                               type="number"
@@ -958,20 +974,36 @@ export function SalesProposalWorkspacePage() {
                                   prev.map((r) => (r.id === row.id ? { ...r, manpower_count: val } : r)),
                                 )
                               }}
-                              onBlur={(e) =>
+                              onBlur={(e) => {
+                                const val = e.currentTarget.value === '' ? null : Number(e.currentTarget.value)
+                                if (!row.override_reason?.trim()) {
+                                  setSaving(key, false, 'Override reason is required before saving headcount.')
+                                  return
+                                }
                                 void saveBudgetField(row.id, {
-                                  manpower_count: e.currentTarget.value === '' ? null : Number(e.currentTarget.value),
+                                  manpower_count: val,
+                                  override_reason: row.override_reason,
                                 })
-                              }
+                              }}
                             />
                           ) : (
                             <span className="inline-flex h-7 w-12 items-center justify-center rounded-lg bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-900/20 dark:text-brand-400">{row.manpower_count ?? '—'}</span>
                           )}
                         </TD>
-                        <TD className="py-2 px-4 text-right">
+                        {/* Operations Basis (read-only) */}
+                        <TD className="py-3 px-3 text-right">
+                          <div>
+                            <span className="text-sm text-app-secondary">{formatIndianCurrency(row.source_unit_cost)}</span>
+                            {row.source_unit_cost_origin && (
+                              <p className="text-[10px] text-app-subtle">{row.source_unit_cost_origin}</p>
+                            )}
+                          </div>
+                        </TD>
+                        {/* Sales Rate (editable) */}
+                        <TD className="py-2 px-3 text-right">
                           {canEdit ? (
                             <input
-                              className={CELL + ' text-right w-28 ml-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
+                              className={CELL + ' text-right w-24 ml-auto rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
                               value={row.unit_cost ?? ''}
                               onChange={(e) => {
                                 const val = e.target.value
@@ -979,38 +1011,76 @@ export function SalesProposalWorkspacePage() {
                                   prev.map((r) => (r.id === row.id ? { ...r, unit_cost: val } : r)),
                                 )
                               }}
-                              onBlur={(e) =>
-                                void saveBudgetField(row.id, { unit_cost: e.currentTarget.value || null })
-                              }
+                              onBlur={(e) => {
+                                const val = e.currentTarget.value || null
+                                if (!row.override_reason?.trim()) {
+                                  setSaving(key, false, 'Override reason is required before saving sales rate.')
+                                  return
+                                }
+                                void saveBudgetField(row.id, {
+                                  unit_cost: val,
+                                  override_reason: row.override_reason,
+                                })
+                              }}
                             />
                           ) : (
                             <span className="text-sm font-medium text-app-secondary">{formatIndianCurrency(row.unit_cost)}</span>
                           )}
                         </TD>
-                        <TD className="py-3 px-4 text-right">
+                        {/* Total */}
+                        <TD className="py-3 px-3 text-right">
                           <span className="text-sm font-semibold text-brand-600 dark:text-brand-400">{formatIndianCurrency(row.total_cost)}</span>
                         </TD>
-                        <TD className="py-2 px-4">
-                          {canEdit ? (
-                            <input
-                              className={CELL + ' w-full rounded-lg border border-transparent hover:border-app-border focus:border-brand-500'}
-                              value={row.remarks ?? ''}
-                              placeholder="Add remarks..."
-                              onChange={(e) => {
-                                const val = e.target.value
-                                setBudgetLines((prev) =>
-                                  prev.map((r) => (r.id === row.id ? { ...r, remarks: val } : r)),
-                                )
-                              }}
-                              onBlur={(e) =>
-                                void saveBudgetField(row.id, { remarks: e.currentTarget.value || undefined })
-                              }
-                            />
-                          ) : (
-                            <span className="text-sm text-app-secondary">{row.remarks ?? '—'}</span>
-                          )}
+                        {/* Override info */}
+                        <TD className="py-2 px-3">
+                          <div className="space-y-1">
+                            {isOverridden && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                                <AlertTriangle className="h-3 w-3" />
+                                Manual override
+                              </span>
+                            )}
+                            {isOverridden && row.overridden_by_name && (
+                              <p className="text-[10px] text-app-subtle">
+                                by {row.overridden_by_name}
+                              </p>
+                            )}
+                            {canEdit ? (
+                              <input
+                                className={`w-full rounded border px-2 py-1 text-xs placeholder:text-app-subtle focus:outline-none ${needsReason ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20 focus:border-amber-500' : 'border-app-border bg-app-surface focus:border-brand-500'}`}
+                                value={row.override_reason ?? ''}
+                                placeholder={needsReason ? 'Reason required...' : 'Override reason...'}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setBudgetLines((prev) =>
+                                    prev.map((r) => (r.id === row.id ? { ...r, override_reason: val } : r)),
+                                  )
+                                  if (val.trim()) setSaving(key, false, null)
+                                }}
+                                onBlur={(e) => {
+                                  const reason = e.currentTarget.value.trim()
+                                  if (!reason) {
+                                    setSaving(key, false, 'Override reason is required before saving sales changes.')
+                                    return
+                                  }
+                                  void saveBudgetField(row.id, {
+                                    unit_cost: row.unit_cost ?? null,
+                                    manpower_count: row.manpower_count ?? null,
+                                    override_reason: reason,
+                                  })
+                                }}
+                              />
+                            ) : (
+                              row.override_reason && (
+                                <p className="text-xs text-app-secondary">{row.override_reason}</p>
+                              )
+                            )}
+                            {saveStates[key]?.error ? (
+                              <p className="text-xs leading-tight text-status-danger">{saveStates[key]?.error}</p>
+                            ) : null}
+                          </div>
                         </TD>
-                        <TD className="py-3 px-4 text-right">{rowStatus(saveStates, key)}</TD>
+                        <TD className="py-3 px-3 text-right">{rowStatus(saveStates, key)}</TD>
                       </TR>
                     )
                   })}
@@ -1379,79 +1449,10 @@ export function SalesProposalWorkspacePage() {
 
   function clientResponseTab() {
     if (!proposal) return null
-    const showInitialSend = canInitialSendProposal(proposal, canSendToClient)
-    const showResend = canResendProposal(proposal, canSendToClient)
     const showResponded = clientHasResponded(proposal)
 
     return (
       <div className="space-y-6">
-        {clientSendSuccess ? (
-          <div className="flex items-start gap-2 rounded-xl border border-status-hired/30 bg-status-hired/10 px-4 py-3">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-hired" aria-hidden />
-            <p className="text-sm text-app-text">{clientSendSuccess}</p>
-          </div>
-        ) : null}
-
-        {!showResponded ? (
-          <section>
-            <div className="mb-4 flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10">
-                <Send className="h-4 w-4 text-brand-600" />
-              </div>
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-app-text">Send to Client</h3>
-            </div>
-
-            {showInitialSend ? (
-              <Button className="rounded-lg bg-brand-600 hover:bg-brand-700" onClick={() => openSendDrawer('send')}>
-                <Send className="mr-1.5 h-4 w-4" />
-                Send proposal to client
-              </Button>
-            ) : showResend ? (
-              <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-5 shadow-sm dark:border-brand-800/50 dark:bg-brand-950/20">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
-                    <Send className="h-5 w-5 text-brand-600" aria-hidden />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div>
-                      <p className="text-sm font-semibold text-app-heading">Proposal sent to client</p>
-                      <p className="mt-1 text-sm text-app-secondary">Waiting for client response.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-app-subtle">Response:</span>
-                      <Badge variant={proposalStatusVariant('pending')} className="text-[10px]">
-                        {proposalStatusLabel('pending')}
-                      </Badge>
-                    </div>
-                    {proposal.sent_to_client_at ? (
-                      <p className="flex items-center gap-1.5 text-xs text-app-secondary">
-                        <Clock className="h-3.5 w-3.5 shrink-0 text-app-subtle" aria-hidden />
-                        Sent {formatDateTime(proposal.sent_to_client_at)}
-                      </p>
-                    ) : null}
-                    <p className="text-xs text-app-subtle">
-                      Resending creates a new secure link. Older unused links will stop working.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="rounded-lg"
-                      onClick={() => openSendDrawer('resend')}
-                    >
-                      <Send className="mr-1.5 h-4 w-4" aria-hidden />
-                      Resend proposal link
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-app-border bg-slate-50/50 p-4 shadow-sm dark:bg-slate-800/20">
-                <p className="text-sm text-app-secondary">{getClientSendBlocker(proposal, canSendToClient)}</p>
-              </div>
-            )}
-          </section>
-        ) : null}
-
         {showResponded ? (
           <section>
             <div className="mb-4 flex items-center gap-2">
@@ -1759,6 +1760,105 @@ export function SalesProposalWorkspacePage() {
     )
   }
 
+  // ── Tab: Client Preview ─────────────────────────────────────────────────────
+
+  async function handleDownloadPdf() {
+    setPdfDownloading(true)
+    setPdfError(null)
+    try {
+      const { blob, filename } = await downloadClientProposalPdf(proposalId)
+      // Check if backend returned JSON error instead of PDF
+      if (blob.type === 'application/json') {
+        setPdfError(await parseBlobError(blob))
+        return
+      }
+      saveBlob(blob, filename)
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+        setPdfError(await parseBlobError(err.response.data))
+      } else {
+        setPdfError(parseApiError(err, 'Failed to download PDF').message)
+      }
+    } finally {
+      setPdfDownloading(false)
+    }
+  }
+
+  function clientPreviewTab() {
+    if (!proposal) return null
+    const documentData = clientProposalDataFromInternal(proposal, lead)
+    const showInitialSend = canInitialSendProposal(proposal, canSendToClient)
+    const showResend = canResendProposal(proposal, canSendToClient)
+
+    return (
+      <div className="-mx-5 -mb-5 -mt-5">
+        {/* Action bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-app-border bg-app-surface p-5">
+          <div className="flex items-center gap-3">
+            {showInitialSend ? (
+              <Button className="rounded-lg bg-brand-600 hover:bg-brand-700" onClick={() => openSendDrawer('send')}>
+                <Send className="mr-1.5 h-4 w-4" />
+                Send proposal to client
+              </Button>
+            ) : showResend ? (
+              <Button variant="secondary" className="rounded-lg" onClick={() => openSendDrawer('resend')}>
+                <Send className="mr-1.5 h-4 w-4" />
+                Resend proposal link
+              </Button>
+            ) : null}
+            {/* Status summary when no send actions */}
+            {!showInitialSend && !showResend && (
+              <div className="flex items-center gap-4 text-sm">
+                <Badge variant={proposalStatusVariant(proposal.status)}>{proposalStatusLabel(proposal.status)}</Badge>
+                {proposal.sent_to_client_at && (
+                  <span className="text-app-secondary">
+                    Sent {formatShortDate(proposal.sent_to_client_at)}
+                  </span>
+                )}
+                {proposal.client_approval_status && (
+                  <Badge variant={proposal.client_approval_status === 'approved' ? 'success' : proposal.client_approval_status === 'rejected' ? 'danger' : 'warning'}>
+                    Client: {proposal.client_approval_status.replace(/_/g, ' ')}
+                  </Badge>
+                )}
+              </div>
+            )}
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => void handleDownloadPdf()}
+            disabled={pdfDownloading}
+          >
+            <Download className="mr-1.5 h-4 w-4" />
+            {pdfDownloading ? 'Downloading...' : 'Download PDF'}
+          </Button>
+        </div>
+
+        {/* Success message */}
+        {clientSendSuccess ? (
+          <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-status-hired/30 bg-status-hired/10 px-4 py-3">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-hired" aria-hidden />
+            <p className="text-sm text-app-text">{clientSendSuccess}</p>
+          </div>
+        ) : null}
+
+        {pdfError && (
+          <div className="mx-5 mt-4">
+            <p className="text-sm text-status-danger">{pdfError}</p>
+          </div>
+        )}
+
+        {/* Document preview */}
+        <div className="p-5">
+          <ClientProposalDocument
+            data={documentData}
+            budgetLines={budgetLines}
+            breakupLines={breakupLines}
+          />
+        </div>
+      </div>
+    )
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) return <Spinner label="Loading proposal..." />
@@ -1861,6 +1961,7 @@ export function SalesProposalWorkspacePage() {
         {tab === 'approval' && approvalTab()}
         {tab === 'client-response' && clientResponseTab()}
         {tab === 'revision-history' && revisionHistoryTab()}
+        {tab === 'client-preview' && clientPreviewTab()}
       </div>
 
       <SendToClientDrawer

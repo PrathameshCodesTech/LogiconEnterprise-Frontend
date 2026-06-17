@@ -1,16 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import axios from 'axios'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { getPublicProposalResponse, submitPublicProposalResponse } from '@/api/publicSales'
+import { Download } from 'lucide-react'
+import { getPublicProposalResponse, submitPublicProposalResponse, downloadPublicProposalPdf } from '@/api/publicSales'
 import { parseApiError } from '@/lib/apiError'
+import { saveBlob, parseBlobError } from '@/lib/fileDownload'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
-import {
-  buildBreakupRoleGroups,
-  getBreakupComponentStyle,
-  getBreakupRoleBandStyle,
-  getUnmappedBreakupLines,
-} from '@/features/sales/salesBreakupGrouping'
+import { ClientProposalDocument } from './ClientProposalDocument'
+import { clientProposalDataFromPublic } from './clientProposalDocumentData'
 import type {
   ProposalBreakupLine,
   ProposalBudgetLine,
@@ -19,7 +17,7 @@ import type {
   PublicBreakupLine,
 } from '@/types/sales'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ------------------------------------------------------------------
 
 type ResponseValue = 'approved' | 'rejected' | 'revision_required' | 'negotiation_required'
 
@@ -62,36 +60,17 @@ const RESPONSE_LABELS: Record<string, string> = {
   negotiation_required: 'Negotiation requested',
 }
 
-function formatCurrency(value: string | null | undefined): string {
-  if (!value) return '—'
-  const num = parseFloat(value)
-  if (isNaN(num)) return value
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(num)
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
-}
-
 function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
+  if (!iso) return '-'
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
+  if (isNaN(d.getTime())) return '-'
   return d.toLocaleString('en-IN', {
     year: 'numeric', month: 'long', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 }
 
-// ─── Layout shell ─────────────────────────────────────────────────────────────
+// --- Layout shell -------------------------------------------------------------
 
 function PublicShell({ subtitle, children }: { subtitle: string; children: ReactNode }) {
   useEffect(() => {
@@ -126,7 +105,7 @@ function PublicShell({ subtitle, children }: { subtitle: string; children: React
       <footer className="border-t border-app-border bg-app-surface py-6">
         <div className="mx-auto max-w-4xl px-6 text-center">
           <p className="text-xs text-app-subtle">
-            Logicon Facility Management · This link is confidential and intended for the recipient only.
+            Logicon Facility Management - This link is confidential and intended for the recipient only.
           </p>
         </div>
       </footer>
@@ -134,7 +113,7 @@ function PublicShell({ subtitle, children }: { subtitle: string; children: React
   )
 }
 
-// ─── Section card ─────────────────────────────────────────────────────────────
+// --- Section card -------------------------------------------------------------
 
 function SectionCard({
   title,
@@ -156,7 +135,7 @@ function SectionCard({
   )
 }
 
-// ─── Status message pages ─────────────────────────────────────────────────────
+// --- Status message pages -----------------------------------------------------
 
 function StatusPage({
   subtitle,
@@ -180,7 +159,7 @@ function StatusPage({
   )
 }
 
-// ─── Validate form ────────────────────────────────────────────────────────────
+// --- Validate form ------------------------------------------------------------
 
 type FormState = {
   response: ResponseValue | ''
@@ -205,7 +184,7 @@ function validateForm(form: FormState): Record<string, string> {
   return errors
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// --- Main page ----------------------------------------------------------------
 
 type PageState = 'loading' | 'loaded' | 'not_found' | 'expired' | 'already_responded' | 'error' | 'submitted'
 type TokenErrorCode = 'invalid_token' | 'expired' | 'revoked' | 'used' | 'already_responded' | 'not_approved' | ''
@@ -254,7 +233,6 @@ export function PublicProposalResponsePage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [tokenErrorCode, setTokenErrorCode] = useState<TokenErrorCode>('')
   const [proposalData, setProposalData] = useState<PublicProposalResponse | null>(null)
-  const [breakupExpanded, setBreakupExpanded] = useState(false)
 
   const [form, setForm] = useState<FormState>({
     response: '',
@@ -265,6 +243,8 @@ export function PublicProposalResponsePage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -341,7 +321,29 @@ export function PublicProposalResponsePage() {
     }
   }
 
-  // ── Loading / terminal states ──────────────────────────────────────────────
+  async function handleDownloadPdf() {
+    setPdfDownloading(true)
+    setPdfError(null)
+    try {
+      const { blob, filename } = await downloadPublicProposalPdf(token)
+      // Check if backend returned JSON error instead of PDF
+      if (blob.type === 'application/json') {
+        setPdfError(await parseBlobError(blob))
+        return
+      }
+      saveBlob(blob, filename)
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+        setPdfError(await parseBlobError(err.response.data))
+      } else {
+        setPdfError(parseApiError(err, 'Failed to download PDF').message)
+      }
+    } finally {
+      setPdfDownloading(false)
+    }
+  }
+
+  // -- Loading / terminal states ----------------------------------------------
 
   if (!token) {
     return (
@@ -357,7 +359,7 @@ export function PublicProposalResponsePage() {
   if (pageState === 'loading') {
     return (
       <PublicShell subtitle="Proposal Review">
-        <Spinner label="Loading proposal…" />
+        <Spinner label="Loading proposal..." />
       </PublicShell>
     )
   }
@@ -388,7 +390,7 @@ export function PublicProposalResponsePage() {
 
   if (pageState === 'already_responded') {
     const responded = proposalData?.responded_at
-    const responseLabel = proposalData?.client_response ? (RESPONSE_LABELS[proposalData.client_response] ?? proposalData.client_response) : '—'
+    const responseLabel = proposalData?.client_response ? (RESPONSE_LABELS[proposalData.client_response] ?? proposalData.client_response) : '-'
     return (
       <PublicShell subtitle="Proposal Review">
         <div className="rounded-xl border border-app-border bg-app-surface p-8 text-center shadow-panel">
@@ -437,7 +439,7 @@ export function PublicProposalResponsePage() {
     )
   }
 
-  // ── Loaded state ────────────────────────────────────────────────────────────
+  // -- Loaded state ------------------------------------------------------------
 
   const d = proposalData!
   const budgetLines: PublicBudgetLine[] = d.budget_lines ?? []
@@ -471,236 +473,43 @@ export function PublicProposalResponsePage() {
     amount: line.amount ?? null,
     sort_order: line.sort_order ?? 0,
   }))
-  const breakupRoleGroups = buildBreakupRoleGroups(groupedBreakupLines, groupedBudgetLines)
-  const unmappedBreakupLines = getUnmappedBreakupLines(groupedBreakupLines)
 
   return (
-    <PublicShell subtitle="Proposal Review">
-      {/* Proposal header */}
-      <SectionCard title="Proposal details">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="text-xs text-app-subtle">Client</p>
-            <p className="mt-0.5 text-base font-semibold text-app-text">{d.client_name}</p>
-          </div>
-          {d.proposal_version_number != null ? (
-            <div>
-              <p className="text-xs text-app-subtle">Proposal</p>
-              <p className="mt-0.5 text-sm font-medium text-app-text">Version {d.proposal_version_number}</p>
-            </div>
-          ) : null}
-          {d.grand_total ? (
-            <div>
-              <p className="text-xs text-app-subtle">Grand total</p>
-              <p className="mt-0.5 text-lg font-bold text-app-text">{formatCurrency(d.grand_total)}</p>
-            </div>
-          ) : null}
-          {d.expires_at ? (
-            <div>
-              <p className="text-xs text-app-subtle">Valid until</p>
-              <p className="mt-0.5 text-sm font-medium text-app-text">{formatDate(d.expires_at)}</p>
-            </div>
-          ) : d.valid_to ? (
-            <div>
-              <p className="text-xs text-app-subtle">Valid until</p>
-              <p className="mt-0.5 text-sm font-medium text-app-text">{formatDate(d.valid_to)}</p>
-            </div>
-          ) : null}
-          {d.sales_owner_name ? (
-            <div>
-              <p className="text-xs text-app-subtle">Contact</p>
-              <p className="mt-0.5 text-sm font-medium text-app-text">{d.sales_owner_name}</p>
-            </div>
-          ) : null}
+    <PublicShell subtitle="Commercial Proposal">
+      {/* Intro message */}
+      <div className="mb-6 rounded-xl border border-app-border bg-app-surface p-5 shadow-panel">
+        <p className="text-sm text-app-secondary">
+          Review the commercial proposal below and submit your response. You may print or save the proposal as PDF using the button provided.
+        </p>
+      </div>
+
+      {/* Commercial Proposal Document - primary view */}
+      <div className="mb-6">
+        <div className="mb-4 flex justify-end no-print">
+          <Button
+            variant="secondary"
+            onClick={() => void handleDownloadPdf()}
+            disabled={pdfDownloading}
+          >
+            <Download className="mr-1.5 h-4 w-4" />
+            {pdfDownloading ? 'Downloading...' : 'Download PDF'}
+          </Button>
         </div>
-        {d.notes ? (
-          <div className="mt-4 rounded-lg border border-app-border bg-app-muted p-3">
-            <p className="text-xs text-app-subtle">Remarks from Logicon</p>
-            <p className="mt-1 whitespace-pre-line text-sm text-app-text">{d.notes}</p>
+        {pdfError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3">
+            <p className="text-sm text-red-700">{pdfError}</p>
           </div>
-        ) : null}
-      </SectionCard>
+        )}
+        <ClientProposalDocument
+          data={clientProposalDataFromPublic(d)}
+          budgetLines={groupedBudgetLines}
+          breakupLines={groupedBreakupLines}
+        />
+      </div>
 
-      {/* Financial summary */}
-      <SectionCard title="Financial summary">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { label: 'Total manpower', value: d.manpower_total != null ? String(d.manpower_total) : null },
-            { label: 'Management fee', value: d.management_fee_percent ? `${d.management_fee_percent}%` : null },
-            { label: 'GST applicable', value: d.gst_applicable != null ? (d.gst_applicable ? 'Yes' : 'No') : null },
-            { label: 'Grand total', value: d.grand_total ? formatCurrency(d.grand_total) : null, bold: true },
-          ].filter((row) => row.value != null).map(({ label, value, bold }) => (
-            <div key={label} className="rounded-lg border border-app-border bg-app-bg p-3">
-              <p className="text-xs text-app-subtle">{label}</p>
-              <p className={`mt-0.5 ${bold ? 'text-base font-bold text-app-text' : 'text-sm font-medium text-app-text'}`}>
-                {value}
-              </p>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* Budget Lines */}
-      {budgetLines.length > 0 ? (
-        <SectionCard title="Budget lines">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-app-border text-left">
-                  <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Description</th>
-                  {budgetLines.some((r) => r.service_category) ? (
-                    <th className="pb-2 pr-4 text-xs font-semibold text-app-subtle">Category</th>
-                  ) : null}
-                  <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Manpower</th>
-                  {budgetLines.some((r) => r.unit_cost) ? (
-                    <th className="pb-2 pr-4 text-right text-xs font-semibold text-app-subtle">Unit cost</th>
-                  ) : null}
-                  {budgetLines.some((r) => r.total_cost) ? (
-                    <th className="pb-2 text-right text-xs font-semibold text-app-subtle">Total cost</th>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-app-border">
-                {budgetLines.map((row) => (
-                  <tr key={row.id}>
-                    <td className="py-2.5 pr-4 font-medium text-app-text">{row.description ?? '—'}</td>
-                    {budgetLines.some((r) => r.service_category) ? (
-                      <td className="py-2.5 pr-4 text-app-secondary">{row.service_category ?? '—'}</td>
-                    ) : null}
-                    <td className="py-2.5 pr-4 text-right text-app-secondary">{row.manpower_count ?? '—'}</td>
-                    {budgetLines.some((r) => r.unit_cost) ? (
-                      <td className="py-2.5 pr-4 text-right text-app-secondary">
-                        {row.unit_cost ? formatCurrency(row.unit_cost) : '—'}
-                      </td>
-                    ) : null}
-                    {budgetLines.some((r) => r.total_cost) ? (
-                      <td className="py-2.5 text-right text-app-secondary">
-                        {row.total_cost ? formatCurrency(row.total_cost) : '—'}
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      ) : null}
-
-      {/* Salary Breakup - collapsed by default */}
-      {breakupLines.length > 0 ? (
-        <SectionCard
-          title="Salary breakup"
-          action={
-            <button
-              type="button"
-              onClick={() => setBreakupExpanded((x) => !x)}
-              className="flex items-center gap-1 text-xs text-white/70 hover:text-white"
-            >
-              {breakupExpanded ? (
-                <>Hide <ChevronDown className="h-3 w-3" /></>
-              ) : (
-                <>Show <ChevronRight className="h-3 w-3" /></>
-              )}
-            </button>
-          }
-        >
-          {breakupExpanded ? (
-            unmappedBreakupLines.length > 0 ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                This proposal needs to be refreshed by the sales team before salary breakup can be reviewed.
-              </div>
-            ) : (
-              <div className="space-y-4">
-              <div className="rounded-lg border border-app-border bg-app-bg px-3 py-2">
-                <p className="text-xs font-medium text-app-secondary">
-                  {breakupRoleGroups.length} role{breakupRoleGroups.length !== 1 ? 's' : ''} - {breakupLines.length} component
-                  {breakupLines.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-
-              {breakupRoleGroups.map((group, groupIndex) => {
-                const band = getBreakupRoleBandStyle(groupIndex, group.groupKey)
-                return (
-                  <section
-                    key={group.groupKey}
-                    className={`overflow-hidden rounded-lg border border-l-4 shadow-sm ${band.border} ${band.borderAccent}`}
-                  >
-                    <div className={`border-b px-4 py-3 ${band.headerBg} ${band.headerBorder}`}>
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`text-sm font-semibold ${band.titleText}`}>{group.title}</p>
-                          <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs ${band.metaText}`}>
-                            {group.siteName ? <span>{group.siteName}</span> : null}
-                            {group.headcount != null ? <span>Headcount {group.headcount}</span> : null}
-                            {group.unitCost ? <span>Unit {formatCurrency(group.unitCost)}</span> : null}
-                            {group.totalCost ? <span>Budget {formatCurrency(group.totalCost)}</span> : null}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-app-subtle">
-                            Role total
-                          </p>
-                          <p className={`text-sm font-bold tabular-nums ${band.totalText}`}>
-                            {formatCurrency(String(group.total))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className={`space-y-3 p-3 ${band.bodyBg}`}>
-                      {group.sections.map((section) => {
-                        const sectionStyle = getBreakupComponentStyle(section.componentType)
-                        return (
-                          <div
-                            key={`${group.groupKey}-${section.componentType}`}
-                            className="overflow-hidden rounded-lg border border-app-border bg-app-surface"
-                          >
-                            <div className={`flex items-center justify-between border-b px-3 py-2 ${sectionStyle.border}`}>
-                              <p className={`text-xs font-semibold ${sectionStyle.text}`}>{section.label}</p>
-                              <p className="text-xs font-semibold tabular-nums text-app-text">
-                                {formatCurrency(String(section.total))}
-                              </p>
-                            </div>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-b border-app-border text-left">
-                                    <th className="px-3 py-2 text-xs font-semibold text-app-subtle">Component</th>
-                                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">%</th>
-                                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle">Amount</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-app-border">
-                                  {section.rows.map((row) => (
-                                    <tr key={row.id}>
-                                      <td className="px-3 py-2.5 font-medium text-app-text">{row.component_name ?? '-'}</td>
-                                      <td className="px-3 py-2.5 text-right text-app-secondary">
-                                        {row.percentage != null ? `${row.percentage}%` : '-'}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right text-app-secondary">
-                                        {row.amount ? formatCurrency(row.amount) : '-'}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </section>
-                )
-              })}
-              </div>
-            )
-          ) : (
-            <p className="text-sm text-app-subtle">Click "Show" to view salary component details.</p>
-          )}
-        </SectionCard>
-      ) : null}
       {/* Response form */}
-      <SectionCard title="Your Response">
+      <div className="no-print">
+        <SectionCard title="Your Response">
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6" noValidate>
           {/* Decision */}
           <div>
@@ -799,7 +608,7 @@ export function PublicProposalResponsePage() {
               rows={4}
               value={form.remarks}
               onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
-              placeholder="Any comments, questions, or conditions…"
+              placeholder="Any comments, questions, or conditions..."
               className="w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text placeholder:text-app-subtle focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
             />
             {fieldErrors.remarks ? (
@@ -817,10 +626,12 @@ export function PublicProposalResponsePage() {
             disabled={submitting}
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-brand-800 px-6 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-brand-900 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {submitting ? 'Submitting…' : 'Submit Response'}
+            {submitting ? 'Submitting...' : 'Submit Response'}
           </button>
         </form>
-      </SectionCard>
+        </SectionCard>
+      </div>
     </PublicShell>
   )
 }
+

@@ -128,6 +128,7 @@ export function InterviewAssignmentsPage() {
   const me = useAuthStore((s) => s.me)
   const meCaps = me?.capabilities ?? []
   const canManage = hasAnyCapability(meCaps, [CAP.INTERVIEW_MANAGE])
+  const canSubmitFeedback = hasAnyCapability(meCaps, [CAP.INTERVIEW_FEEDBACK_CREATE])
 
   const [assignments, setAssignments] = useState<InterviewAssignmentRow[]>([])
   const [counts, setCounts] = useState<Record<InterviewAssignmentState, number>>({
@@ -408,7 +409,7 @@ export function InterviewAssignmentsPage() {
                   Open application
                 </Link>
 
-                {canShowFeedbackAction(a) && (
+                {canSubmitFeedback && canShowFeedbackAction(a) && (
                   <button
                     type="button"
                     onClick={() => openFeedback(a)}

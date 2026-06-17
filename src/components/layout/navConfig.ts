@@ -10,6 +10,7 @@ import {
   Handshake,
   Inbox,
   KanbanSquare,
+  Package,
   UserSearch,
   LayoutDashboard,
   MapPin,
@@ -82,7 +83,7 @@ const ITEMS = {
 
   // Hiring & deployment
   interviewPipeline: { path: '/hiring/pipeline', label: 'Interview pipeline', icon: KanbanSquare, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
-  interviewAssignments: { path: '/hiring/interview-assignments', label: 'Interview assignments', icon: ClipboardCheck, requiredCapabilities: [CAP.INTERVIEW_READ] },
+  interviewAssignments: { path: '/hiring/interview-assignments', label: 'Interview assignments', icon: ClipboardCheck, requiredCapabilities: [CAP.INTERVIEW_ASSIGNMENT_READ] },
   hiringDemands: { path: '/hiring/demands', label: 'Hiring demands', icon: ClipboardList, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
   hiringApplications: { path: '/hiring/applications', label: 'Hiring applications', icon: Briefcase, requiredCapabilities: [CAP.HIRING_APPLICATION_READ] },
   resumePool: { path: '/candidates', label: 'Resume pool', icon: UserSearch, requiredCapabilities: [CAP.CANDIDATE_READ] },
@@ -111,6 +112,9 @@ const ITEMS = {
     icon: ClipboardList,
     requiredCapabilities: [CAP.HIRING_APPLICATION_READ],
   },
+
+  // Integrations
+  assetVault: { path: '/asset-vault', label: 'Asset Vault', icon: Package, requiredCapabilities: [CAP.ASSET_VAULT_ACCESS] },
 } as const satisfies Record<string, NavItem>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,6 +175,10 @@ export const navGroups: NavGroup[] = [
       ITEMS.deploymentHistory,
     ],
   },
+  {
+    label: 'Integrations',
+    items: [ITEMS.assetVault],
+  },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +206,14 @@ const salesNavGroups: NavGroup[] = [
     label: 'Candidate intake',
     items: [ITEMS.qrCampaigns, ITEMS.formBuilder, ITEMS.intakeSubmissions],
   },
+  {
+    label: 'Hiring',
+    items: [ITEMS.interviewAssignments],
+  },
+  {
+    label: 'Integrations',
+    items: [ITEMS.assetVault],
+  },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,6 +237,14 @@ const operationsNavGroups: NavGroup[] = [
     label: 'Workforce',
     items: [ITEMS.employees, ITEMS.siteDeployments, ITEMS.deploymentHistory],
   },
+  {
+    label: 'Hiring',
+    items: [ITEMS.interviewAssignments],
+  },
+  {
+    label: 'Integrations',
+    items: [ITEMS.assetVault],
+  },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,6 +263,14 @@ const financeNavGroups: NavGroup[] = [
   {
     label: 'Internal hiring requests',
     items: [ITEMS.mrf],
+  },
+  {
+    label: 'Hiring',
+    items: [ITEMS.interviewAssignments],
+  },
+  {
+    label: 'Integrations',
+    items: [ITEMS.assetVault],
   },
 ]
 
@@ -278,6 +310,10 @@ const hrNavGroups: NavGroup[] = [
   {
     label: 'Internal hiring requests',
     items: [ITEMS.mrf],
+  },
+  {
+    label: 'Integrations',
+    items: [ITEMS.assetVault],
   },
 ]
 

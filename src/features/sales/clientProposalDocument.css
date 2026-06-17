@@ -1,0 +1,124 @@
+/* Print styles for client proposal document */
+
+@media print {
+  /* Hide app chrome and buttons */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 20mm;
+  }
+
+  /* Section page breaks */
+  .print-break-before {
+    page-break-before: always;
+  }
+
+  .print-break-after {
+    page-break-after: always;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Clean backgrounds for print */
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Remove shadows for print */
+  .proposal-document {
+    box-shadow: none !important;
+  }
+}
+
+/* Document container styling */
+.proposal-document {
+  width: 100%;
+  background: white;
+  color: #111827;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* For print, constrain to A4 width */
+@media print {
+  .proposal-document {
+    max-width: 210mm;
+    margin: 0 auto;
+  }
+}
+
+/* Table styling */
+.proposal-document table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.proposal-document th,
+.proposal-document td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+}
+
+.proposal-document th {
+  background-color: #f9fafb;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.proposal-document td {
+  font-size: 0.875rem;
+}
+
+/* Numeric alignment */
+.proposal-document .text-right {
+  text-align: right;
+}
+
+/* Section headers */
+.proposal-document .section-header {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* Summary cards */
+.proposal-document .summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.proposal-document .summary-row:last-child {
+  border-bottom: none;
+}
+
+.proposal-document .summary-label {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.proposal-document .summary-value {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #111827;
+}
+
+.proposal-document .summary-total {
+  font-size: 1rem;
+  color: #059669;
+}

@@ -3,12 +3,13 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { ErrorState } from '@/components/ui/ErrorState'
 import type { SkillCategory } from '@/api/jobs'
-import { SKILL_CATEGORY_OPTIONS } from '@/features/masters/jobRoles/types'
+import { HIRING_LANE_OPTIONS, SKILL_CATEGORY_OPTIONS, type HiringLane } from '@/features/masters/jobRoles/types'
 
 export interface JobRoleFormValues {
   name: string
   code: string
   skill_category: SkillCategory | ''
+  hiring_lane: HiringLane | ''
   description: string
   is_active: boolean
 }
@@ -30,6 +31,7 @@ export function JobRoleForm({
     name: initialValues?.name ?? '',
     code: initialValues?.code ?? '',
     skill_category: (initialValues?.skill_category as SkillCategory | '') ?? '',
+    hiring_lane: (initialValues?.hiring_lane as HiringLane | '') ?? '',
     description: initialValues?.description ?? '',
     is_active: initialValues?.is_active ?? true,
   }))
@@ -37,8 +39,9 @@ export function JobRoleForm({
   const nameError = useMemo(() => (values.name.trim() ? null : 'Name is required.'), [values.name])
   const codeError = useMemo(() => (values.code.trim() ? null : 'Code is required.'), [values.code])
   const skillError = useMemo(() => (values.skill_category ? null : 'Skill category is required.'), [values.skill_category])
+  const laneError = useMemo(() => (values.hiring_lane ? null : 'Hiring category is required.'), [values.hiring_lane])
 
-  const canSubmit = !submitting && !nameError && !codeError && !skillError
+  const canSubmit = !submitting && !nameError && !codeError && !skillError && !laneError
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -79,6 +82,23 @@ export function JobRoleForm({
       >
         <option value="">Select skill category</option>
         {SKILL_CATEGORY_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+
+      <Select
+        id="jr_hiring_lane"
+        label="Hiring category"
+        value={values.hiring_lane}
+        onChange={(e) => setValues((v) => ({ ...v, hiring_lane: e.target.value as HiringLane }))}
+        disabled={submitting}
+        error={laneError ?? undefined}
+        required
+      >
+        <option value="">Select hiring category</option>
+        {HIRING_LANE_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>

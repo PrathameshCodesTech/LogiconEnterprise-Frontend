@@ -35,6 +35,9 @@ import {
   DOCUMENT_TYPE_FILTER_OPTIONS,
   documentTypeLabel,
   documentTypeShort,
+  HIRING_LANE_FILTER_OPTIONS,
+  hiringLaneLabel,
+  hiringLaneVariant,
   JOURNEY_STATUS_FILTER_OPTIONS,
   poolResumeStatusLabel,
   poolResumeStatusVariant,
@@ -171,6 +174,12 @@ function PoolDocumentCard({ c, onOpen }: { c: CandidateRow; onOpen: () => void }
                 {journeyLabel}
               </Badge>
             )}
+            {/* Hiring lane */}
+            {c.hiring_lane && (
+              <Badge variant={hiringLaneVariant(c.hiring_lane)} className="text-[10px]">
+                {hiringLaneLabel(c.hiring_lane)}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -253,6 +262,7 @@ export function CandidatesListPage() {
   const availability = params.get('availability_status') ?? ''
   const sourceType = params.get('source_type') ?? ''
   const journeyStatus = params.get('journey_status') ?? ''
+  const hiringLane = params.get('hiring_lane') ?? ''
   const mappedRole = params.get('target_job_role') ?? ''
   const page = parsePage(params.get('page'))
 
@@ -283,8 +293,8 @@ export function CandidatesListPage() {
   }, [])
 
   useEffect(() => {
-    if (lifecycle || availability || sourceType || journeyStatus) setMoreFiltersOpen(true)
-  }, [lifecycle, availability, sourceType, journeyStatus])
+    if (lifecycle || availability || sourceType || journeyStatus || hiringLane) setMoreFiltersOpen(true)
+  }, [lifecycle, availability, sourceType, journeyStatus, hiringLane])
 
   useEffect(() => {
     let cancelled = false
@@ -304,6 +314,7 @@ export function CandidatesListPage() {
           availability_status: availability || undefined,
           journey_status: journeyStatus || undefined,
           source_type: sourceType || undefined,
+          hiring_lane: hiringLane || undefined,
           target_job_role: mappedRole && Number.isFinite(roleId) ? roleId : undefined,
           page,
         })
@@ -319,7 +330,7 @@ export function CandidatesListPage() {
     return () => {
       cancelled = true
     }
-  }, [search, skill, documentType, minExperience, maxExperience, location, lifecycle, availability, sourceType, journeyStatus, mappedRole, page, refreshKey])
+  }, [search, skill, documentType, minExperience, maxExperience, location, lifecycle, availability, sourceType, journeyStatus, hiringLane, mappedRole, page, refreshKey])
 
   function setField(key: string, value: string) {
     const p = new URLSearchParams(params)
@@ -475,7 +486,14 @@ export function CandidatesListPage() {
           {moreFiltersOpen ? 'Hide advanced filters' : 'Show advanced filters'}
         </button>
         {moreFiltersOpen && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Select id="cand_lane" label="Hiring category" value={hiringLane} onChange={(e) => setField('hiring_lane', e.target.value)}>
+              {HIRING_LANE_FILTER_OPTIONS.map((o) => (
+                <option key={o.value || 'any-lane'} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
             <Select id="cand_source" label="Source" value={sourceType} onChange={(e) => setField('source_type', e.target.value)}>
               {SOURCE_TYPE_FILTER_OPTIONS.map((o) => (
                 <option key={o.value || 'any-src'} value={o.value}>

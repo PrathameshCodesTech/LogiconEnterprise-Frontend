@@ -70,6 +70,9 @@ export interface CandidateRow {
   employee_status?: string | null
   deployment_id?: number | null
   deployment_status?: string | null
+  // Hiring lane (category)
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
 }
 
 export interface CandidateWriteInput {
@@ -116,6 +119,9 @@ export interface ResumeRow {
   error_message?: string
   manual_review_reason?: string
   uploaded_by?: number | null
+  // Hiring lane (category)
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
 }
 
 /** One file row in an async resume import batch. */
@@ -152,6 +158,9 @@ export interface ResumeImportBatch {
   failed_count: number
   manual_review_count: number
   items: ResumeImportItem[]
+  // Hiring lane (category)
+  hiring_lane?: 'client_billable' | 'internal_non_billable' | string | null
+  hiring_lane_label?: string | null
 }
 
 /** One row in an Excel/CSV candidate import response. */

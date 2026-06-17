@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, CheckCircle2, ExternalLink, Plus } from 'lucide-react'
 import {
@@ -42,6 +42,7 @@ import {
   surveyStatusVariant,
 } from '@/features/sales/salesUtils'
 import { SalesLeadFormDrawer } from '@/features/sales/SalesLeadFormDrawer'
+import { SiteSurveyCommercialPreviewDrawer } from '@/features/sales/SiteSurveyCommercialPreviewDrawer'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Drawer } from '@/components/ui/Drawer'
@@ -343,75 +344,89 @@ function OverviewTab({ lead }: { lead: SalesLead }) {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Key fields grid */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        {[
-          { label: 'Lead type', value: <Badge variant={leadTypeVariant(lead.lead_type)}>{LEAD_TYPE_LABELS[lead.lead_type]}</Badge> },
-          { label: 'Stage', value: <Badge variant={stageVariant(lead.current_stage)}>{stageLabel(lead.current_stage)}</Badge> },
-          { label: 'Client', value: lead.client_name },
-          { label: 'Existing account', value: lead.existing_client_name ?? (lead.existing_client != null ? `#${lead.existing_client}` : '—') },
-          { label: 'Sales owner', value: lead.sales_person_name ?? (lead.sales_person != null ? `#${lead.sales_person}` : '—') },
-          { label: 'Created', value: formatDateTime(lead.created_at) },
-          { label: 'Last updated', value: formatDateTime(lead.updated_at) },
-        ].map((f) => (
-          <div key={f.label} className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">{f.label}</p>
-            {typeof f.value === 'string' ? (
-              <p className="text-sm text-app-text">{f.value || '—'}</p>
-            ) : (
-              f.value
-            )}
+    <div className="space-y-4">
+      {/* Lead Details Card */}
+      <div className="rounded-xl border border-app-border bg-app-surface shadow-sm overflow-hidden">
+        <div className="border-l-4 border-l-brand-500 bg-gradient-to-r from-brand-50/80 to-transparent dark:from-brand-900/20 px-5 py-4">
+          <h3 className="text-base font-semibold text-app-heading tracking-tight">Lead Details</h3>
+          <p className="mt-1 text-sm text-app-secondary">Key information about this sales lead</p>
+        </div>
+        <div className="p-5 pt-4 space-y-5">
+          {/* Key fields grid */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+            {[
+              { label: 'Lead type', value: <Badge variant={leadTypeVariant(lead.lead_type)}>{LEAD_TYPE_LABELS[lead.lead_type]}</Badge> },
+              { label: 'Stage', value: <Badge variant={stageVariant(lead.current_stage)}>{stageLabel(lead.current_stage)}</Badge> },
+              { label: 'Client', value: lead.client_name },
+              { label: 'Existing account', value: lead.existing_client_name ?? (lead.existing_client != null ? `#${lead.existing_client}` : '—') },
+              { label: 'Sales owner', value: lead.sales_person_name ?? (lead.sales_person != null ? `#${lead.sales_person}` : '—') },
+              { label: 'Created', value: formatDateTime(lead.created_at) },
+              { label: 'Last updated', value: formatDateTime(lead.updated_at) },
+            ].map((f) => (
+              <div key={f.label}>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-app-subtle mb-1">{f.label}</p>
+                {typeof f.value === 'string' ? (
+                  <p className="text-sm text-app-text">{f.value || '—'}</p>
+                ) : (
+                  f.value
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+
+          {/* Notes */}
+          {lead.sales_remarks ? (
+            <div className="border-t border-app-border pt-4">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-app-subtle mb-1">Notes</p>
+              <p className="whitespace-pre-wrap text-sm text-app-text">{lead.sales_remarks}</p>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {/* Notes */}
-      {lead.sales_remarks ? (
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">Notes</p>
-          <p className="whitespace-pre-wrap text-sm text-app-text">{lead.sales_remarks}</p>
+      {/* Journey Progress Card */}
+      <div className="rounded-xl border border-app-border bg-app-surface shadow-sm overflow-hidden">
+        <div className="border-l-4 border-l-status-success bg-gradient-to-r from-green-50/80 to-transparent dark:from-green-900/20 px-5 py-4">
+          <h3 className="text-base font-semibold text-app-heading tracking-tight">Journey Progress</h3>
+          <p className="mt-1 text-sm text-app-secondary">Track the sales pipeline progression</p>
         </div>
-      ) : null}
-
-      {/* Journey progress */}
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-app-subtle">Journey progress</p>
-        <ol className="space-y-0">
-          {JOURNEY_STEPS.map((step, idx) => {
-            const status = stepStatus(step)
-            return (
-              <li key={step.key} className="flex items-start gap-3">
-                {/* Vertical line + circle */}
-                <div className="flex flex-col items-center">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 shrink-0 ${
-                    status === 'done' ? 'border-brand-600 bg-brand-600 text-white' :
-                    status === 'current' ? 'border-brand-600 bg-white text-brand-600' :
-                    'border-app-border bg-app-muted text-app-subtle'
-                  }`}>
-                    {status === 'done' ? (
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    ) : (
-                      <span className="text-[10px] font-bold">{idx + 1}</span>
-                    )}
+        <div className="p-5 pt-4">
+          <ol className="space-y-0">
+            {JOURNEY_STEPS.map((step, idx) => {
+              const status = stepStatus(step)
+              return (
+                <li key={step.key} className="flex items-start gap-3">
+                  {/* Vertical line + circle */}
+                  <div className="flex flex-col items-center">
+                    <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 shrink-0 ${
+                      status === 'done' ? 'border-brand-600 bg-brand-600 text-white' :
+                      status === 'current' ? 'border-brand-600 bg-white text-brand-600' :
+                      'border-app-border bg-app-muted text-app-subtle'
+                    }`}>
+                      {status === 'done' ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <span className="text-[10px] font-bold">{idx + 1}</span>
+                      )}
+                    </div>
+                    {idx < JOURNEY_STEPS.length - 1 ? (
+                      <div className={`w-0.5 h-6 ${status === 'done' ? 'bg-brand-600' : 'bg-app-border'}`} />
+                    ) : null}
                   </div>
-                  {idx < JOURNEY_STEPS.length - 1 ? (
-                    <div className={`w-0.5 h-6 ${status === 'done' ? 'bg-brand-600' : 'bg-app-border'}`} />
-                  ) : null}
-                </div>
-                {/* Content */}
-                <div className={`pb-4 ${status === 'future' ? 'opacity-50' : ''}`}>
-                  <p className={`text-sm font-medium ${status === 'current' ? 'text-brand-600' : 'text-app-text'}`}>
-                    {step.label}
-                    {status === 'done' ? <span className="ml-2 text-xs text-status-success">Done</span> : null}
-                    {status === 'current' ? <span className="ml-2 text-xs text-brand-600">Current</span> : null}
-                  </p>
-                  <p className="text-xs text-app-secondary">{step.desc}</p>
-                </div>
-              </li>
-            )
-          })}
-        </ol>
+                  {/* Content */}
+                  <div className={`pb-4 ${status === 'future' ? 'opacity-50' : ''}`}>
+                    <p className={`text-sm font-medium ${status === 'current' ? 'text-brand-600' : 'text-app-text'}`}>
+                      {step.label}
+                      {status === 'done' ? <span className="ml-2 text-xs text-status-success">Done</span> : null}
+                      {status === 'current' ? <span className="ml-2 text-xs text-brand-600">Current</span> : null}
+                    </p>
+                    <p className="text-xs text-app-secondary">{step.desc}</p>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        </div>
       </div>
     </div>
   )
@@ -1551,6 +1566,23 @@ export function SalesLeadDetailPage() {
   const [activeSitesCount, setActiveSitesCount] = useState<number | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState(false)
 
+  // Commercial preview drawer state
+  const [commercialPreviewOpen, setCommercialPreviewOpen] = useState(false)
+
+  // Get completed survey IDs for commercial preview
+  const completedSurveyIds = useMemo(
+    () => pageSurveys.filter((s) => s.status === 'completed').map((s) => s.id),
+    [pageSurveys],
+  )
+
+  function handleOpenCommercialPreview() {
+    if (completedSurveyIds.length === 0) {
+      setActionError('No completed surveys found. Complete at least one survey first.')
+      return
+    }
+    setCommercialPreviewOpen(true)
+  }
+
   async function load() {
     setLoading(true)
     setError(null)
@@ -1683,10 +1715,10 @@ export function SalesLeadDetailPage() {
           {canEdit && lead.current_stage === 'site_survey_completed' ? (
             <Button
               variant="primary"
-              disabled={actionBusy !== null}
-              onClick={() => void handleGenerateProposal()}
+              disabled={actionBusy !== null || completedSurveyIds.length === 0}
+              onClick={handleOpenCommercialPreview}
             >
-              {actionBusy === 'generate' ? 'Generating…' : 'Generate Proposal'}
+              Preview commercial basis
             </Button>
           ) : null}
           {canEdit ? (
@@ -1835,38 +1867,12 @@ export function SalesLeadDetailPage() {
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-app-subtle">Lead actions</p>
               <Button
                 variant="secondary"
-                disabled={actionBusy !== null}
-                onClick={() => void handleGenerateProposal()}
+                disabled={actionBusy !== null || completedSurveyIds.length === 0}
+                onClick={handleOpenCommercialPreview}
               >
-                {actionBusy === 'generate' ? 'Generating…' : 'Generate proposal'}
+                Preview commercial basis
               </Button>
-              {missingRuleCodes && missingRuleCodes.length > 0 ? (
-                <div className="mt-4 rounded-panel border border-status-warning/40 bg-status-warning/8 p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-status-warning">
-                        Proposal component rules are not fully configured
-                      </p>
-                      <p className="mt-1 text-xs text-app-secondary">
-                        Finance/admin must configure all salary and statutory components before proposals can be generated.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {missingRuleCodes.map((code) => (
-                          <Badge key={code} variant="danger">{code}</Badge>
-                        ))}
-                      </div>
-                      <Link
-                        to="/sales/component-rules"
-                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-status-warning/20 px-3 py-1.5 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/30"
-                      >
-                        Open Component Rules
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ) : actionError ? (
+              {actionError ? (
                 <p className="mt-2 text-sm text-status-danger">{actionError}</p>
               ) : null}
             </div>
@@ -1929,6 +1935,16 @@ export function SalesLeadDetailPage() {
         initialLead={lead}
         onClose={() => setEditDrawerOpen(false)}
         onSaved={() => void load()}
+      />
+
+      {/* Commercial preview drawer */}
+      <SiteSurveyCommercialPreviewDrawer
+        open={commercialPreviewOpen}
+        surveyIds={completedSurveyIds}
+        clientName={lead.client_name}
+        onClose={() => setCommercialPreviewOpen(false)}
+        onGenerate={() => void handleGenerateProposal()}
+        generating={actionBusy === 'generate'}
       />
     </div>
   )

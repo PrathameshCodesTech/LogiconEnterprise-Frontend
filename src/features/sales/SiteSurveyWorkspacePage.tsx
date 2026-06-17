@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, Play, Plus, Settings2, Users, Wrench } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowLeft, Check, CheckCircle2, ClipboardCheck, FileText, Info, MapPin, MessageSquare, Pencil, Play, Plus, RefreshCw, Settings2, Users, Wrench, X } from 'lucide-react'
 import {
   assignSiteSurveyOwner,
   createSiteSurveyEquipmentLine,
@@ -14,6 +14,7 @@ import {
   listSurveyRoleMappings,
   markSiteSurveyCompleted,
   markSiteSurveyStarted,
+  refreshSiteSurveyDeploymentAssumptions,
   seedSiteSurveyDefaultLines,
   updateSiteSurveyEquipmentLine,
   updateSiteSurveyIssueLine,
@@ -23,6 +24,7 @@ import {
 } from '@/api/sales'
 import type { UserRow } from '@/api/users'
 import { listJobRoles, type JobRoleRow } from '@/api/jobs'
+import { formatMoneyAmount } from '@/features/budgets/budgetDisplay'
 import { ROUTES } from '@/app/routes'
 import { useAuthStore } from '@/features/auth/authStore'
 import { surveyStatusLabel, surveyStatusVariant, formatShortDate } from '@/features/sales/salesUtils'
@@ -40,6 +42,7 @@ import type {
   SiteSurveyScopeAnswer,
   SiteSurveyShiftDeployment,
   SiteSurveyStructuredResponse,
+  SurveyDeploymentAssumptionRefreshResult,
   SurveyRoleMapping,
 } from '@/types/sales'
 
@@ -96,6 +99,24 @@ function formatHeadcount(value: number | string | null | undefined): string {
   return num % 1 === 0 ? String(Math.trunc(num)) : String(num)
 }
 
+/**
+ * Formats money amounts for display.
+ */
+function formatMoney(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  return formatMoneyAmount(String(value), 'INR')
+}
+
+/**
+ * Returns a label for the base wage source.
+ */
+function getBaseWageSourceLabel(source: string | null | undefined): string | null {
+  if (!source) return null
+  if (source === 'wage_master') return 'From wage master'
+  if (source === 'wage_master_daily') return 'From daily wage'
+  return source
+}
+
 // ─── Utility Components ───────────────────────────────────────────────────────
 
 function SaveIndicator({ state }: { state: RowSaveState | undefined }) {
@@ -145,12 +166,14 @@ function ApplicableToggle({
 function SectionCard({
   title,
   description,
+  headerRight,
   children,
   className = '',
   accent = 'brand',
 }: {
   title: string
   description?: string
+  headerRight?: React.ReactNode
   children: React.ReactNode
   className?: string
   accent?: 'brand' | 'success' | 'warning' | 'neutral'
@@ -164,9 +187,12 @@ function SectionCard({
 
   return (
     <div className={`rounded-xl border border-app-border bg-app-surface shadow-sm overflow-hidden ${className}`}>
-      <div className={`border-l-4 ${accentColors[accent]} px-5 py-4`}>
-        <h3 className="text-base font-semibold text-app-heading tracking-tight">{title}</h3>
-        {description ? <p className="mt-1 text-sm text-app-secondary">{description}</p> : null}
+      <div className={`border-l-4 ${accentColors[accent]} px-5 py-4 flex items-start justify-between gap-4`}>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-semibold text-app-heading tracking-tight">{title}</h3>
+          {description ? <p className="mt-1 text-sm text-app-secondary">{description}</p> : null}
+        </div>
+        {headerRight ? <div className="flex-shrink-0">{headerRight}</div> : null}
       </div>
       <div className="p-5 pt-4">{children}</div>
     </div>
@@ -643,6 +669,21 @@ export function SiteSurveyWorkspacePage() {
   const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('')
 
   const seededRef = useRef(false)
+  const autoRefreshAttemptedRef = useRef(false)
+
+  // Deployment assumption refresh state
+  const [assumptionRefreshBusy, setAssumptionRefreshBusy] = useState(false)
+  const [assumptionRefreshResult, setAssumptionRefreshResult] = useState<SurveyDeploymentAssumptionRefreshResult | null>(null)
+  const [assumptionRefreshError, setAssumptionRefreshError] = useState<string | null>(null)
+
+  // Remarks popover state
+  const [remarksPopoverRowId, setRemarksPopoverRowId] = useState<number | null>(null)
+  const [remarksPopoverValue, setRemarksPopoverValue] = useState('')
+
+  // Base wage override popover state
+  const [wageOverridePopoverRowId, setWageOverridePopoverRowId] = useState<number | null>(null)
+  const [wageOverrideValue, setWageOverrideValue] = useState('')
+  const [wageOverrideReason, setWageOverrideReason] = useState('')
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -654,6 +695,47 @@ export function SiteSurveyWorkspacePage() {
     setEquipmentLines([...res.equipment_lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)))
     setIssueLines([...res.issue_lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)))
     setSaveStates({})
+  }
+
+  /**
+   * Check if deployment assumptions should be auto-refreshed.
+   * Returns true if any role-linked row has missing base_wage or monthly_amount.
+   */
+  function shouldRefreshDeploymentAssumptions(rows: SiteSurveyShiftDeployment[]): boolean {
+    return rows.some((row) =>
+      row.is_applicable !== false &&
+      row.line_type !== 'header' &&
+      row.line_type !== 'total' &&
+      row.line_type !== 'subtotal' &&
+      row.job_role &&
+      (!row.base_wage || row.monthly_amount == null)
+    )
+  }
+
+  /**
+   * Check if survey status is editable (not completed/locked).
+   */
+  function isSurveyEditable(status: string | undefined): boolean {
+    if (!status) return false
+    const editableStatuses = new Set(['pending', 'in_progress', 'assigned'])
+    return editableStatuses.has(status)
+  }
+
+  async function handleRefreshDeploymentAssumptions() {
+    setAssumptionRefreshBusy(true)
+    setAssumptionRefreshError(null)
+    try {
+      const result = await refreshSiteSurveyDeploymentAssumptions(surveyId)
+      setAssumptionRefreshResult(result)
+
+      // Reload structured data to get updated rows
+      const res = await getSiteSurveyStructured(surveyId)
+      applyData(res)
+    } catch (e) {
+      setAssumptionRefreshError(parseApiError(e, 'Could not refresh deployment assumptions').message)
+    } finally {
+      setAssumptionRefreshBusy(false)
+    }
   }
 
   async function load() {
@@ -670,6 +752,15 @@ export function SiteSurveyWorkspacePage() {
         try {
           const seeded = await seedSiteSurveyDefaultLines(surveyId)
           applyData(seeded)
+          // Auto-refresh deployment assumptions if needed (only once, only if editable)
+          if (
+            !autoRefreshAttemptedRef.current &&
+            isSurveyEditable(seeded.survey.status) &&
+            shouldRefreshDeploymentAssumptions(seeded.shift_deployments)
+          ) {
+            autoRefreshAttemptedRef.current = true
+            void handleRefreshDeploymentAssumptions()
+          }
         } catch {
           // If seeding fails, just use what we have
           applyData(res)
@@ -678,6 +769,15 @@ export function SiteSurveyWorkspacePage() {
         }
       } else {
         applyData(res)
+        // Auto-refresh deployment assumptions if needed (only once, only if editable)
+        if (
+          !autoRefreshAttemptedRef.current &&
+          isSurveyEditable(res.survey.status) &&
+          shouldRefreshDeploymentAssumptions(res.shift_deployments)
+        ) {
+          autoRefreshAttemptedRef.current = true
+          void handleRefreshDeploymentAssumptions()
+        }
       }
     } catch (e: unknown) {
       setLoadError(parseApiError(e, 'Failed to load site survey').message)
@@ -810,6 +910,12 @@ export function SiteSurveyWorkspacePage() {
         'first_shift_count',
         'second_shift_count',
         'night_shift_count',
+        'reliever_count',
+        'shift_hours',
+        'working_days',
+        'base_wage',
+        'base_wage_overridden',
+        'base_wage_override_reason',
         'is_applicable',
         'line_type',
       ].some((field) => field in payload)
@@ -1003,8 +1109,11 @@ export function SiteSurveyWorkspacePage() {
 
   // ─── Completeness Calculations ────────────────────────────────────────────────
 
-  const scopeFilledCount = scopeAnswers.filter((a) => a.value_text?.trim()).length
-  const scopeTotal = scopeAnswers.length
+  const scopeAnswersForForm = data?.site_context
+    ? scopeAnswers.filter((a) => a.category !== 'client_scope_site')
+    : scopeAnswers
+  const scopeFilledCount = scopeAnswersForForm.filter((a) => a.value_text?.trim()).length
+  const scopeTotal = scopeAnswersForForm.length
   const scopePercent = scopeTotal > 0 ? (scopeFilledCount / scopeTotal) * 100 : 0
 
   const applicableDeployments = shiftDeployments.filter((r) => r.is_applicable !== false && r.line_type !== 'header' && r.line_type !== 'total' && r.line_type !== 'subtotal')
@@ -1068,7 +1177,86 @@ export function SiteSurveyWorkspacePage() {
 
   const scopeTab = (
     <div className="space-y-6">
-      {scopeAnswers.length === 0 ? (
+      {/* Site context from sales setup (read-only) */}
+      {data?.site_context ? (
+        <SectionCard
+          title="Site details from sales setup"
+          description="These details come from the site record created during sales setup. Use survey remarks for operational observations."
+          accent="brand"
+        >
+          <div className="mb-4 flex items-center gap-2 text-xs font-medium text-app-secondary">
+            <MapPin className="h-4 w-4 text-brand-600" />
+            Read-only site record
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <FormField label="Site name" value={data.site_context.site_name || ''} onChange={() => undefined} disabled />
+            <FormField label="City" value={data.site_context.city || ''} onChange={() => undefined} disabled />
+            <FormField label="State" value={data.site_context.state || ''} onChange={() => undefined} disabled />
+            <FormField
+              label="Location area"
+              value={data.site_context.location_area ? `#${data.site_context.location_area}` : ''}
+              onChange={() => undefined}
+              disabled
+            />
+            <FormField
+              label="Address"
+              value={data.site_context.site_address || ''}
+              onChange={() => undefined}
+              multiline
+              disabled
+              className="sm:col-span-2"
+            />
+            <FormField
+              label="Site remarks"
+              value={data.site_context.remarks || ''}
+              onChange={() => undefined}
+              multiline
+              disabled
+              className="sm:col-span-2"
+            />
+          </div>
+          <div className="hidden">
+            <div>
+              <p className="text-xs text-app-subtle uppercase tracking-wider">Site Name</p>
+              <p className="text-sm text-app-text">{data.site_context.site_name || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-app-subtle uppercase tracking-wider">Address</p>
+              <p className="text-sm text-app-text">{data.site_context.site_address || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-app-subtle uppercase tracking-wider">City</p>
+              <p className="text-sm text-app-text">{data.site_context.city || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-app-subtle uppercase tracking-wider">State</p>
+              <p className="text-sm text-app-text">{data.site_context.state || '—'}</p>
+            </div>
+            {data.site_context.location_area && (
+              <div>
+                <p className="text-xs text-app-subtle uppercase tracking-wider">Location Area</p>
+                <p className="text-sm text-app-text">#{data.site_context.location_area}</p>
+              </div>
+            )}
+            {data.site_context.remarks && (
+              <div className="sm:col-span-2">
+                <p className="text-xs text-app-subtle uppercase tracking-wider">Remarks</p>
+                <p className="text-sm text-app-text">{data.site_context.remarks}</p>
+              </div>
+            )}
+          </div>
+          <p className="mt-3 text-[11px] text-app-subtle">
+            These details come from the site record created during sales setup. Use survey remarks for operational observations.
+          </p>
+        </SectionCard>
+      ) : (
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-4 py-3">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <p className="text-sm text-amber-700 dark:text-amber-400">Site details are not linked to this survey.</p>
+        </div>
+      )}
+
+      {scopeAnswersForForm.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="rounded-2xl bg-gradient-to-br from-brand-100 to-brand-50 p-5 mb-4 shadow-sm">
             <ClipboardCheck className="h-8 w-8 text-brand-600" />
@@ -1098,7 +1286,7 @@ export function SiteSurveyWorkspacePage() {
           </div>
 
           {/* Form sections */}
-          {groupByCategory(scopeAnswers).map(([cat, answers], idx) => (
+          {groupByCategory(scopeAnswersForForm).map(([cat, answers], idx) => (
             <SectionCard
               key={cat}
               title={SCOPE_CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -1143,23 +1331,77 @@ export function SiteSurveyWorkspacePage() {
 
   const deploymentTab = (
     <div className="space-y-3">
-      <SectionCard title="Manpower Deployment" description="Enter headcount for each role by shift">
+      {/* Refresh errors panel */}
+      {assumptionRefreshResult && assumptionRefreshResult.errors.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+              {assumptionRefreshResult.errors.length} row{assumptionRefreshResult.errors.length > 1 ? 's' : ''} could not be resolved
+            </p>
+          </div>
+          <ul className="space-y-1.5">
+            {assumptionRefreshResult.errors.map((err) => (
+              <li key={err.id} className="text-xs text-amber-700 dark:text-amber-400">
+                {err.code === 'role_required' ? (
+                  <>Map &ldquo;{err.description}&rdquo; to a job role before wage can be resolved.</>
+                ) : err.code === 'wage_not_found' ? (
+                  <>No wage master found for &ldquo;{err.job_role_name ?? err.description}&rdquo;. Configure wage rate or enter override.</>
+                ) : (
+                  err.message
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <SectionCard
+        title="Manpower Deployment"
+        description="Enter headcount for each role by shift"
+        headerRight={
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="secondary"
+              onClick={() => void handleRefreshDeploymentAssumptions()}
+              disabled={assumptionRefreshBusy || !canUpdate}
+              className="min-h-8 px-2.5 text-xs"
+            >
+              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${assumptionRefreshBusy ? 'animate-spin' : ''}`} />
+              {assumptionRefreshBusy ? 'Refreshing...' : 'Refresh wages'}
+            </Button>
+            {assumptionRefreshResult && !assumptionRefreshBusy && (
+              <span className="text-[10px] text-app-subtle">
+                {assumptionRefreshResult.summary.updated} updated, {assumptionRefreshResult.summary.skipped} current
+              </span>
+            )}
+            {assumptionRefreshError && (
+              <span className="text-[10px] text-status-danger">{assumptionRefreshError}</span>
+            )}
+          </div>
+        }
+      >
         {shiftDeployments.length === 0 ? (
           <p className="text-sm text-app-secondary py-6 text-center">No deployment rows configured.</p>
         ) : (
           <div className="overflow-x-auto -mx-4">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full min-w-[1400px]">
               <thead>
                 <tr className="border-b border-app-border bg-app-muted/30">
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-16"></th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider">Role / Description</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">General</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 1</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Shift 2</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Night</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-20">Total</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-32">Remarks</th>
-                  <th className="px-3 py-2 w-14"></th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-12"></th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider min-w-[160px]">Role / Description</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">Gen</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">S1</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">S2</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">Night</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">Rel</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-16">Total</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-14">Hrs</th>
+                  <th className="px-2 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-14">Days</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold text-app-subtle uppercase tracking-wider w-28">Base Wage</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold text-app-subtle uppercase tracking-wider w-28">Monthly</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-28">Remarks</th>
+                  <th className="px-2 py-2 w-12"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-app-border">
@@ -1173,7 +1415,7 @@ export function SiteSurveyWorkspacePage() {
                   if (isHeader) {
                     return (
                       <tr key={row.id} className="bg-brand-50/50">
-                        <td colSpan={9} className="px-3 py-2">
+                        <td colSpan={14} className="px-2 py-2">
                           <span className="text-sm font-semibold text-brand-700">{row.description}</span>
                         </td>
                       </tr>
@@ -1183,15 +1425,20 @@ export function SiteSurveyWorkspacePage() {
                   if (isAgg) {
                     return (
                       <tr key={row.id} className="bg-app-muted/50 font-medium">
-                        <td className="px-3 py-2"></td>
-                        <td className="px-3 py-2 text-sm text-app-text">{row.description}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.general_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.first_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.second_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm">{formatHeadcount(row.night_shift_count)}</td>
-                        <td className="px-3 py-2 text-center text-sm font-semibold">{formatHeadcount(row.total_count)}</td>
-                        <td className="px-3 py-2"></td>
-                        <td className="px-3 py-2"></td>
+                        <td className="px-2 py-2"></td>
+                        <td className="px-2 py-2 text-sm text-app-text">{row.description}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.general_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.first_shift_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.second_shift_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.night_shift_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.reliever_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm font-semibold">{formatHeadcount(row.total_count)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.shift_hours)}</td>
+                        <td className="px-2 py-2 text-center text-sm">{formatHeadcount(row.working_days)}</td>
+                        <td className="px-2 py-2 text-right text-sm">{formatMoney(row.base_wage)}</td>
+                        <td className="px-2 py-2 text-right text-sm font-semibold">{formatMoney(row.monthly_amount)}</td>
+                        <td className="px-2 py-2"></td>
+                        <td className="px-2 py-2"></td>
                       </tr>
                     )
                   }
@@ -1201,9 +1448,13 @@ export function SiteSurveyWorkspacePage() {
                   const isIgnored = isRoleMappingIgnored(row.description)
                   const mapping = !hasLinkedRole && !isIgnored ? findMappingForRow(row.description) : null
 
+                  // Check if base wage is being edited (show override reason field)
+                  const isBaseWageOverridden = row.base_wage_overridden === true
+                  const baseWageSourceLabel = getBaseWageSourceLabel(row.base_wage_source)
+
                   return (
                     <tr key={row.id} className={`${!applicable ? 'bg-app-muted/30 opacity-60' : 'hover:bg-app-muted/20'} transition-colors`}>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2">
                         {editable ? (
                           <ApplicableToggle
                             value={applicable}
@@ -1214,7 +1465,7 @@ export function SiteSurveyWorkspacePage() {
                           />
                         ) : null}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2">
                         <div>
                           <p className="text-sm text-app-text">{row.job_role_name ?? row.description ?? '—'}</p>
                           {row.job_role_code && <p className="text-xs text-app-subtle">{row.job_role_code}</p>}
@@ -1253,73 +1504,302 @@ export function SiteSurveyWorkspacePage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2">
+                      {/* General */}
+                      <td className="px-2 py-2">
                         {editable && applicable ? (
                           <NumberInput
                             value={row.general_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, general_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { general_count: v })}
-
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.general_count)}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      {/* Shift 1 */}
+                      <td className="px-2 py-2">
                         {editable && applicable ? (
                           <NumberInput
                             value={row.first_shift_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, first_shift_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { first_shift_count: v })}
-
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.first_shift_count)}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      {/* Shift 2 */}
+                      <td className="px-2 py-2">
                         {editable && applicable ? (
                           <NumberInput
                             value={row.second_shift_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, second_shift_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { second_shift_count: v })}
-
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.second_shift_count)}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      {/* Night */}
+                      <td className="px-2 py-2">
                         {editable && applicable ? (
                           <NumberInput
                             value={row.night_shift_count}
                             onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, night_shift_count: v } : r))}
                             onBlur={(v) => void saveDeploymentField(row.id, { night_shift_count: v })}
-
                           />
                         ) : (
                           <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.night_shift_count)}</span>
                         )}
                       </td>
-                      {/* Total - display only, calculated by backend */}
-                      <td className="px-3 py-2">
-                        <span className="block text-center text-sm font-medium text-app-text">{formatHeadcount(row.total_count)}</span>
-                      </td>
-                      <td className="px-3 py-2">
+                      {/* Reliever */}
+                      <td className="px-2 py-2">
                         {editable && applicable ? (
-                          <input
-                            type="text"
-                            value={row.remarks ?? ''}
-                            onChange={(e) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, remarks: e.target.value } : r))}
-                            onBlur={(e) => void saveDeploymentField(row.id, { remarks: e.target.value || undefined })}
-                            placeholder="Notes..."
-                            className="w-full rounded-lg border border-app-border bg-app-surface px-2 py-1 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+                          <NumberInput
+                            value={row.reliever_count}
+                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, reliever_count: v } : r))}
+                            onBlur={(v) => void saveDeploymentField(row.id, { reliever_count: v })}
                           />
                         ) : (
-                          <span className="text-xs text-app-secondary">{row.remarks ?? '—'}</span>
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.reliever_count)}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      {/* Total - display only, calculated by backend */}
+                      <td className="px-2 py-2">
+                        <span className="block text-center text-sm font-medium text-app-text">{formatHeadcount(row.total_count)}</span>
+                      </td>
+                      {/* Shift Hours */}
+                      <td className="px-2 py-2">
+                        {editable && applicable ? (
+                          <NumberInput
+                            value={row.shift_hours}
+                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, shift_hours: v } : r))}
+                            onBlur={(v) => void saveDeploymentField(row.id, { shift_hours: v })}
+                          />
+                        ) : (
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.shift_hours)}</span>
+                        )}
+                      </td>
+                      {/* Working Days */}
+                      <td className="px-2 py-2">
+                        {editable && applicable ? (
+                          <NumberInput
+                            value={row.working_days}
+                            onChange={(v) => setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, working_days: v } : r))}
+                            onBlur={(v) => void saveDeploymentField(row.id, { working_days: v })}
+                          />
+                        ) : (
+                          <span className="block text-center text-sm text-app-secondary">{formatHeadcount(row.working_days)}</span>
+                        )}
+                      </td>
+                      {/* Base Wage with override UX */}
+                      <td className="px-2 py-2">
+                        <div className="relative">
+                          <div className="flex items-center justify-end gap-1">
+                            <div className="text-right">
+                              <span className="block text-sm text-app-text">{formatMoney(row.base_wage)}</span>
+                              {/* Source label */}
+                              {baseWageSourceLabel && !isBaseWageOverridden && (
+                                <p className="text-[10px] text-app-subtle">{baseWageSourceLabel}</p>
+                              )}
+                              {/* Override badge */}
+                              {isBaseWageOverridden && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                                  <AlertTriangle className="h-2.5 w-2.5" />
+                                  Override
+                                </span>
+                              )}
+                              {/* Missing wage warning for role-linked rows */}
+                              {applicable && hasLinkedRole && !row.base_wage && !isBaseWageOverridden && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                                  <AlertCircle className="h-2.5 w-2.5" />
+                                  Wage not resolved
+                                </span>
+                              )}
+                            </div>
+                            {/* Override button */}
+                            {editable && applicable && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setWageOverridePopoverRowId(row.id)
+                                  setWageOverrideValue(row.base_wage != null ? String(row.base_wage) : '')
+                                  setWageOverrideReason(row.base_wage_override_reason ?? '')
+                                }}
+                                className={`rounded p-1 transition-colors ${
+                                  isBaseWageOverridden
+                                    ? 'text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/20'
+                                    : 'text-app-subtle hover:bg-app-muted hover:text-app-secondary'
+                                }`}
+                                title={isBaseWageOverridden ? 'Edit override' : 'Override wage'}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                          {/* Override Popover */}
+                          {wageOverridePopoverRowId === row.id && (
+                            <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-app-border bg-app-surface shadow-lg">
+                              <div className="flex items-center justify-between border-b border-app-border px-3 py-2">
+                                <span className="text-xs font-medium text-app-heading">Override Base Wage</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setWageOverridePopoverRowId(null)}
+                                  className="rounded p-0.5 text-app-subtle hover:bg-app-muted hover:text-app-text"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <div className="p-3 space-y-3">
+                                <div>
+                                  <label className="block text-[10px] font-medium text-app-subtle uppercase tracking-wider mb-1">
+                                    Base Wage Amount
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={wageOverrideValue}
+                                    onChange={(e) => setWageOverrideValue(e.target.value)}
+                                    placeholder="Enter amount..."
+                                    className="w-full rounded border border-app-border bg-app-surface px-2 py-1.5 text-sm text-app-text text-right placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
+                                    autoFocus
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-app-subtle uppercase tracking-wider mb-1">
+                                    Override Reason <span className="text-status-danger">*</span>
+                                  </label>
+                                  <textarea
+                                    value={wageOverrideReason}
+                                    onChange={(e) => setWageOverrideReason(e.target.value)}
+                                    placeholder="Why is this being overridden?"
+                                    rows={2}
+                                    className="w-full rounded border border-app-border bg-app-surface px-2 py-1.5 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none resize-none"
+                                  />
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    onClick={() => setWageOverridePopoverRowId(null)}
+                                    className="min-h-7 px-2 text-xs"
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    variant="primary"
+                                    onClick={() => {
+                                      const reason = wageOverrideReason.trim()
+                                      if (!reason) {
+                                        setSaving(key, false, 'Override reason is required.')
+                                        return
+                                      }
+                                      setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? {
+                                        ...r,
+                                        base_wage: wageOverrideValue || null,
+                                        base_wage_overridden: true,
+                                        base_wage_override_reason: reason,
+                                      } : r))
+                                      void saveDeploymentField(row.id, {
+                                        base_wage: wageOverrideValue || null,
+                                        base_wage_overridden: true,
+                                        base_wage_override_reason: reason,
+                                      })
+                                      setWageOverridePopoverRowId(null)
+                                    }}
+                                    disabled={!wageOverrideReason.trim()}
+                                    className="min-h-7 px-2 text-xs"
+                                  >
+                                    Save Override
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {saveStates[key]?.error ? (
+                            <p className="text-[10px] leading-tight text-status-danger mt-1">{saveStates[key]?.error}</p>
+                          ) : null}
+                        </div>
+                      </td>
+                      {/* Monthly Amount - display only, calculated by backend */}
+                      <td className="px-2 py-2">
+                        <span className="block text-right text-sm font-medium text-app-text">{formatMoney(row.monthly_amount)}</span>
+                      </td>
+                      {/* Remarks */}
+                      <td className="px-2 py-2">
+                        <div className="relative">
+                          {editable && applicable ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRemarksPopoverRowId(row.id)
+                                  setRemarksPopoverValue(row.remarks ?? '')
+                                }}
+                                className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs transition-colors ${
+                                  row.remarks
+                                    ? 'text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20'
+                                    : 'text-app-subtle hover:bg-app-muted hover:text-app-secondary'
+                                }`}
+                                title={row.remarks || 'Add remarks'}
+                              >
+                                <MessageSquare className="h-3.5 w-3.5" />
+                                {row.remarks ? (
+                                  <span className="max-w-[60px] truncate">{row.remarks}</span>
+                                ) : (
+                                  <span className="text-app-subtle">Add</span>
+                                )}
+                              </button>
+                              {/* Remarks Popover */}
+                              {remarksPopoverRowId === row.id && (
+                                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-app-border bg-app-surface shadow-lg">
+                                  <div className="flex items-center justify-between border-b border-app-border px-3 py-2">
+                                    <span className="text-xs font-medium text-app-heading">Remarks</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRemarksPopoverRowId(null)}
+                                      className="rounded p-0.5 text-app-subtle hover:bg-app-muted hover:text-app-text"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                  <div className="p-3">
+                                    <textarea
+                                      value={remarksPopoverValue}
+                                      onChange={(e) => setRemarksPopoverValue(e.target.value)}
+                                      placeholder="Enter remarks..."
+                                      rows={3}
+                                      className="w-full rounded border border-app-border bg-app-surface px-2 py-1.5 text-xs text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none resize-none"
+                                      autoFocus
+                                    />
+                                    <div className="mt-2 flex justify-end gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        onClick={() => setRemarksPopoverRowId(null)}
+                                        className="min-h-7 px-2 text-xs"
+                                      >
+                                        Cancel
+                                      </Button>
+                                      <Button
+                                        variant="primary"
+                                        onClick={() => {
+                                          setShiftDeployments((prev) => prev.map((r) => r.id === row.id ? { ...r, remarks: remarksPopoverValue } : r))
+                                          void saveDeploymentField(row.id, { remarks: remarksPopoverValue || undefined })
+                                          setRemarksPopoverRowId(null)
+                                        }}
+                                        className="min-h-7 px-2 text-xs"
+                                      >
+                                        Save
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs text-app-secondary">{row.remarks ?? '—'}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2">
                         <SaveIndicator state={saveStates[key]} />
                       </td>
                     </tr>
@@ -1518,15 +1998,12 @@ export function SiteSurveyWorkspacePage() {
         groupEquipment(equipmentLines).map(([cat, lines]) => (
           <SectionCard key={cat} title={cat}>
             <div className="overflow-x-auto -mx-4">
-              <table className="w-full min-w-[700px]">
+              <table className="w-full min-w-[400px]">
                 <thead>
                   <tr className="border-b border-app-border bg-app-muted/30">
                     <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider w-16"></th>
                     <th className="px-3 py-2 text-left text-xs font-semibold text-app-subtle uppercase tracking-wider">Description</th>
                     <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">Qty</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle uppercase tracking-wider w-28">Unit Cost</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-app-subtle uppercase tracking-wider w-28">Total</th>
-                    <th className="px-3 py-2 text-center text-xs font-semibold text-app-subtle uppercase tracking-wider w-24">Amort.</th>
                     <th className="px-3 py-2 w-14"></th>
                   </tr>
                 </thead>
@@ -1541,7 +2018,7 @@ export function SiteSurveyWorkspacePage() {
                     if (isHeader) {
                       return (
                         <tr key={row.id} className="bg-brand-50/50">
-                          <td colSpan={7} className="px-3 py-2">
+                          <td colSpan={4} className="px-3 py-2">
                             <span className="text-sm font-semibold text-brand-700">{row.description}</span>
                           </td>
                         </tr>
@@ -1554,9 +2031,6 @@ export function SiteSurveyWorkspacePage() {
                           <td className="px-3 py-2"></td>
                           <td className="px-3 py-2 text-sm text-app-text font-semibold">{row.description}</td>
                           <td className="px-3 py-2 text-center text-sm">{row.unit_count ?? '—'}</td>
-                          <td className="px-3 py-2 text-right text-sm">{row.amount ?? '—'}</td>
-                          <td className="px-3 py-2 text-right text-sm font-semibold">{row.total ?? '—'}</td>
-                          <td className="px-3 py-2"></td>
                           <td className="px-3 py-2"></td>
                         </tr>
                       )
@@ -1582,35 +2056,9 @@ export function SiteSurveyWorkspacePage() {
                               value={row.unit_count}
                               onChange={(v) => setEquipmentLines((prev) => prev.map((r) => r.id === row.id ? { ...r, unit_count: v } : r))}
                               onBlur={(v) => void saveEquipmentField(row.id, { unit_count: v })}
-  
                             />
                           ) : (
                             <span className="block text-center text-sm text-app-secondary">{row.unit_count ?? '—'}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {editable && applicable ? (
-                            <input
-                              type="text"
-                              value={row.amount ?? ''}
-                              onChange={(e) => setEquipmentLines((prev) => prev.map((r) => r.id === row.id ? { ...r, amount: e.target.value } : r))}
-                              onBlur={(e) => void saveEquipmentField(row.id, { amount: e.target.value || null })}
-                              className="w-full rounded-panel border border-app-border bg-app-surface px-2 py-1 text-sm text-right text-app-text placeholder:text-app-subtle focus:border-brand-500 focus:outline-none"
-                            />
-                          ) : (
-                            <span className="block text-right text-sm text-app-secondary">{row.amount ?? '—'}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right text-sm text-app-secondary">{row.total ?? '—'}</td>
-                        <td className="px-3 py-2">
-                          {editable && applicable ? (
-                            <NumberInput
-                              value={row.amortisation_months}
-                              onChange={(v) => setEquipmentLines((prev) => prev.map((r) => r.id === row.id ? { ...r, amortisation_months: v } : r))}
-                              onBlur={(v) => void saveEquipmentField(row.id, { amortisation_months: v })}
-                            />
-                          ) : (
-                            <span className="block text-center text-sm text-app-secondary">{row.amortisation_months ?? '—'}</span>
                           )}
                         </td>
                         <td className="px-3 py-2">

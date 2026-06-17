@@ -48,7 +48,7 @@ export function MRFLineItemsTable({
   embedded = false,
 }: {
   mrfId: number
-  siteId: number
+  siteId: number | null
   parentMrf: MRFRow
   siteOptions: SiteOption[]
   readinessLineItems?: MRFReadinessLineItem[]
@@ -120,21 +120,23 @@ export function MRFLineItemsTable({
           ? (parentMrf.billing_type as SrrBillingType)
           : undefined
 
-      const srrParams = {
-        site: siteId,
-        is_active: true,
-        billing_type: billingType,
-        page: 1,
-      }
-      if (isBillable && !isClientMrf && parentMrf.required_department) {
-        Object.assign(srrParams, { department: parentMrf.required_department })
-      }
-
-      const [roles, srr, wages] = await Promise.all([
+      const [roles, wages] = await Promise.all([
         listJobRoles(''),
-        listSiteRoleRequirements(srrParams),
         listWageCategories(''),
       ])
+      let srr: { items: SiteRoleRequirementRow[] } = { items: [] }
+      if (isBillable && siteId != null) {
+        const srrParams = {
+          site: siteId,
+          is_active: true,
+          billing_type: billingType,
+          page: 1,
+        }
+        if (!isClientMrf && parentMrf.required_department) {
+          Object.assign(srrParams, { department: parentMrf.required_department })
+        }
+        srr = await listSiteRoleRequirements(srrParams)
+      }
       setJobRoles(roles)
       setSrrs(srr.items)
       setWageCategories(wages)

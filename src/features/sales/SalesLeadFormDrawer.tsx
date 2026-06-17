@@ -34,9 +34,6 @@ export function SalesLeadFormDrawer({ open, initialLead, onClose, onSaved }: Pro
   const [leadSource, setLeadSource] = useState('')
   const [industry, setIndustry] = useState('')
   const [priority, setPriority] = useState('medium')
-  const [expectedStartDate, setExpectedStartDate] = useState('')
-  const [expectedContractMonths, setExpectedContractMonths] = useState('')
-  const [estimatedMonthlyValue, setEstimatedMonthlyValue] = useState('')
   const [rfpRequired, setRfpRequired] = useState(false)
   const [rfqRequired, setRfqRequired] = useState(false)
   const [requirementDetails, setRequirementDetails] = useState('')
@@ -70,13 +67,6 @@ export function SalesLeadFormDrawer({ open, initialLead, onClose, onSaved }: Pro
       setLeadSource(initialLead.lead_source ?? '')
       setIndustry(initialLead.industry ?? '')
       setPriority(initialLead.priority ?? 'medium')
-      setExpectedStartDate(initialLead.expected_start_date ?? '')
-      setExpectedContractMonths(
-        initialLead.expected_contract_months != null ? String(initialLead.expected_contract_months) : '',
-      )
-      setEstimatedMonthlyValue(
-        initialLead.estimated_monthly_value != null ? String(initialLead.estimated_monthly_value) : '',
-      )
       setRfpRequired(Boolean(initialLead.rfp_required))
       setRfqRequired(Boolean(initialLead.rfq_required))
       setRequirementDetails(initialLead.requirement_details ?? '')
@@ -92,9 +82,6 @@ export function SalesLeadFormDrawer({ open, initialLead, onClose, onSaved }: Pro
       setLeadSource('')
       setIndustry('')
       setPriority('medium')
-      setExpectedStartDate('')
-      setExpectedContractMonths('')
-      setEstimatedMonthlyValue('')
       setRfpRequired(false)
       setRfqRequired(false)
       setRequirementDetails('')
@@ -150,9 +137,6 @@ export function SalesLeadFormDrawer({ open, initialLead, onClose, onSaved }: Pro
       lead_source: leadSource.trim() || undefined,
       industry: industry.trim() || undefined,
       priority: priority || undefined,
-      expected_start_date: expectedStartDate || null,
-      expected_contract_months: expectedContractMonths ? Number(expectedContractMonths) : null,
-      estimated_monthly_value: estimatedMonthlyValue ? estimatedMonthlyValue : null,
       rfp_required: rfpRequired,
       rfq_required: rfqRequired,
       requirement_details: requirementDetails.trim() || undefined,
@@ -316,36 +300,6 @@ export function SalesLeadFormDrawer({ open, initialLead, onClose, onSaved }: Pro
           <option value="high">High</option>
           <option value="urgent">Urgent</option>
         </Select>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Input
-            id="sl-expected-start"
-            label="Expected start"
-            type="date"
-            value={expectedStartDate}
-            onChange={(e) => setExpectedStartDate(e.target.value)}
-            error={fieldErrors.expected_start_date}
-          />
-          <Input
-            id="sl-contract-months"
-            label="Contract months"
-            type="number"
-            min="1"
-            value={expectedContractMonths}
-            onChange={(e) => setExpectedContractMonths(e.target.value)}
-            error={fieldErrors.expected_contract_months}
-          />
-          <Input
-            id="sl-estimated-value"
-            label="Monthly value"
-            type="number"
-            min="0"
-            step="0.01"
-            value={estimatedMonthlyValue}
-            onChange={(e) => setEstimatedMonthlyValue(e.target.value)}
-            error={fieldErrors.estimated_monthly_value}
-          />
-        </div>
 
         <div className="grid gap-3 rounded-panel border border-app-border bg-app-muted/30 p-3 text-sm text-app-text sm:grid-cols-2">
           <label className="flex items-center gap-2">

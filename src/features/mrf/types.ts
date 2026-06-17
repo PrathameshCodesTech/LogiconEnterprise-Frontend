@@ -89,7 +89,7 @@ export interface MRFSupportRequirement {
 export interface MRFRow {
   id: number
   org: number
-  site: number
+  site: number | null
   requested_by: number
   requested_by_type: RequestedByType
   mrf_type: MRFType | string
@@ -156,7 +156,7 @@ export interface MRFRow {
 }
 
 export interface MRFWriteInput {
-  site: number
+  site?: number | null // Optional for non-billable internal MRFs
   requested_by_type?: RequestedByType
   mrf_type: MRFType
   billing_type: BillingType

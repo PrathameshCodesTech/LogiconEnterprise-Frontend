@@ -44,6 +44,8 @@ export interface MRFCreateWorkspaceDrawerProps {
   onClose: () => void
   onFinished?: () => void
   initialMRF?: MRFRow | null
+  /** For new MRFs: 'billable' for client/site MRF, 'internal' for internal department MRF */
+  createMode?: 'billable' | 'internal' | null
   siteOptions: SiteOption[]
   departmentOptions: DepartmentOption[]
   departmentsLoading: boolean
@@ -59,6 +61,7 @@ export function MRFCreateWorkspaceDrawer({
   onClose,
   onFinished,
   initialMRF = null,
+  createMode = null,
   siteOptions,
   departmentOptions,
   departmentsLoading,
@@ -371,6 +374,7 @@ export function MRFCreateWorkspaceDrawer({
         formId={FORM_ID}
         mode={createdMrf ? 'edit' : 'create'}
         initialMRF={createdMrf}
+        createMode={createMode}
         siteOptions={siteOptions}
         departmentOptions={departmentOptions}
         departmentsLoading={departmentsLoading}
@@ -387,7 +391,7 @@ export function MRFCreateWorkspaceDrawer({
         <Button variant="secondary" onClick={onClose} disabled={formSubmitting}>
           Cancel
         </Button>
-        <Button type="submit" form={FORM_ID} disabled={formSubmitting || !!lookupError}>
+        <Button type="submit" form={FORM_ID} disabled={formSubmitting || (!!lookupError && createMode !== 'internal')}>
           {formSubmitting ? 'Saving...' : createdMrf ? 'Save changes' : 'Save request details'}
         </Button>
       </div>

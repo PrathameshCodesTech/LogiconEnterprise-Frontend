@@ -21,6 +21,36 @@ export function saveBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Parse error message from blob response.
+ * When responseType is 'blob', axios returns Blob even for error responses.
+ * Backend may return JSON with { detail: "..." } or { message: "..." }.
+ */
+export async function parseBlobError(blob: Blob): Promise<string> {
+  try {
+    const text = await blob.text()
+    const json = JSON.parse(text) as Record<string, unknown>
+    if (typeof json.detail === 'string') return json.detail
+    if (typeof json.message === 'string') return json.message
+    return 'Download failed'
+  } catch {
+    return 'Download failed'
+  }
+}
+
+/**
+ * Parse filename from Content-Disposition header.
+ * Examples: attachment; filename="proposal.pdf" or filename=proposal.pdf
+ */
+export function parseContentDispositionFilename(value: string | null | undefined): string | undefined {
+  if (!value) return undefined
+  const quoted = /filename="([^"]+)"/i.exec(value)
+  if (quoted?.[1]) return quoted[1]
+  const unquoted = /filename=([^;]+)/i.exec(value)
+  if (unquoted?.[1]) return unquoted[1].trim()
+  return undefined
+}
+
 /** Fetch a protected media/API file with the logged-in user's bearer token. */
 export async function downloadAuthenticatedFile(filePath: string, filename: string): Promise<void> {
   const url = absoluteApiFileUrl(filePath)

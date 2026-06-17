@@ -17,6 +17,9 @@ import { Spinner } from '@/components/ui/Spinner'
 import {
   DOCUMENT_TYPE_FILTER_OPTIONS,
   documentTypeLabel,
+  HIRING_LANE_FILTER_OPTIONS,
+  hiringLaneLabel,
+  hiringLaneVariant,
   importBatchStatusLabel,
   poolResumeStatusLabel,
   poolResumeStatusVariant,
@@ -150,6 +153,7 @@ export function ResumeImportHistoryDrawer({
   const [docFilter, setDocFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
+  const [hiringLaneFilter, setHiringLaneFilter] = useState('')
   const [createdByFilter, setCreatedByFilter] = useState('')
   const [createdFrom, setCreatedFrom] = useState('')
   const [createdTo, setCreatedTo] = useState('')
@@ -168,6 +172,7 @@ export function ResumeImportHistoryDrawer({
         document_type: docFilter || undefined,
         status: statusFilter || undefined,
         source_type: sourceFilter || undefined,
+        hiring_lane: hiringLaneFilter || undefined,
         created_by: createdByFilter.trim() || undefined,
         created_from: createdFrom || undefined,
         created_to: createdTo || undefined,
@@ -180,7 +185,7 @@ export function ResumeImportHistoryDrawer({
     } finally {
       setLoading(false)
     }
-  }, [roleFilter, docFilter, statusFilter, sourceFilter, createdByFilter, createdFrom, createdTo])
+  }, [roleFilter, docFilter, statusFilter, sourceFilter, hiringLaneFilter, createdByFilter, createdFrom, createdTo])
 
   useEffect(() => {
     if (!open) return
@@ -211,6 +216,7 @@ export function ResumeImportHistoryDrawer({
       setDocFilter('')
       setStatusFilter('')
       setSourceFilter('')
+      setHiringLaneFilter('')
       setCreatedByFilter('')
       setCreatedFrom('')
       setCreatedTo('')
@@ -254,6 +260,13 @@ export function ResumeImportHistoryDrawer({
     >
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
+          <Select id="hist_lane" label="Hiring category" value={hiringLaneFilter} onChange={(e) => setHiringLaneFilter(e.target.value)}>
+            {HIRING_LANE_FILTER_OPTIONS.map((o) => (
+              <option key={o.value || 'all-lane'} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
           <Select id="hist_role" label="Mapped role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
             <option value="">Any role</option>
             {roles.map((r) => (
@@ -362,6 +375,11 @@ export function ResumeImportHistoryDrawer({
 
                     {/* Tags */}
                     <div className="mt-3 flex flex-wrap gap-1.5">
+                      {batch.hiring_lane && (
+                        <Badge variant={hiringLaneVariant(batch.hiring_lane)} className="text-[10px]">
+                          {batch.hiring_lane_label ?? hiringLaneLabel(batch.hiring_lane)}
+                        </Badge>
+                      )}
                       {batch.document_type ? (
                         <Badge variant="neutral" className="text-[10px]">
                           {documentTypeLabel(batch.document_type)}

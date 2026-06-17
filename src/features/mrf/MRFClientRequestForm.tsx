@@ -480,6 +480,11 @@ export const MRFClientRequestForm = forwardRef<MRFClientRequestFormHandle, {
   const summary = useMemo(() => summarizeClientRequest(roleRows), [roleRows])
 
   const srrById = useMemo(() => new Map(srrRows.map((s) => [String(s.id), s])), [srrRows])
+  const selectedSrrIds = useMemo(
+    () => new Set(roleRows.map((r) => r.siteRoleRequirementId.trim()).filter(Boolean)),
+    [roleRows],
+  )
+  const allApprovedRolesSelected = srrRows.length > 0 && selectedSrrIds.size >= srrRows.length
 
   const formValid =
     !lookupError && !siteError && !requiredByError && !roleRowsError && !srrError
@@ -786,6 +791,10 @@ export const MRFClientRequestForm = forwardRef<MRFClientRequestFormHandle, {
                 const rowTotal = summarizeClientRequest([row]).totalAmount
                 const canRemove = roleRows.length > 1
                 const hasRole = Boolean(row.siteRoleRequirementId.trim())
+                const availableSrrRows = srrRows.filter((srr) => {
+                  const srrId = String(srr.id)
+                  return srrId === row.siteRoleRequirementId || !selectedSrrIds.has(srrId)
+                })
 
                 const roleSubtitle =
                   hasRole && row.approvedRate
@@ -810,7 +819,7 @@ export const MRFClientRequestForm = forwardRef<MRFClientRequestFormHandle, {
                           disabled={busy || srrLoading || !site}
                         >
                           <option value="">Select approved role…</option>
-                          {srrRows.map((srr) => (
+                          {availableSrrRows.map((srr) => (
                             <option key={srr.id} value={String(srr.id)}>
                               {formatSrrOptionLabel(srr)}
                             </option>
@@ -858,11 +867,11 @@ export const MRFClientRequestForm = forwardRef<MRFClientRequestFormHandle, {
                 type="button"
                 variant="secondary"
                 className="w-full sm:w-auto"
-                disabled={busy || !site || srrLoading}
+                disabled={busy || !site || srrLoading || allApprovedRolesSelected}
                 onClick={addRoleRow}
               >
                 <Plus className="mr-1.5 h-4 w-4" aria-hidden />
-                Add another role
+                {allApprovedRolesSelected ? 'All approved roles added' : 'Add another role'}
               </Button>
             </div>
           )}

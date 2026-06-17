@@ -1,5 +1,6 @@
 import { api } from '@/api/client'
 import { unwrapDrfResults } from '@/types/api'
+import { parseContentDispositionFilename } from '@/lib/fileDownload'
 import type { UserRow } from '@/api/users'
 import type {
   GenerateRoleRequirementsResult,
@@ -20,6 +21,7 @@ import type {
   SalesRoleRequirement,
   SalesRoleRequirementWriteInput,
   SiteSurvey,
+  SiteSurveyCommercialPreview,
   SiteSurveyScopeAnswer,
   SiteSurveyEquipmentLine,
   SiteSurveyIssueLine,
@@ -27,6 +29,7 @@ import type {
   SiteSurveyShiftDeployment,
   SiteSurveyStructuredResponse,
   SiteSurveyWriteInput,
+  SurveyDeploymentAssumptionRefreshResult,
   SurveyRoleMapping,
 } from '@/types/sales'
 
@@ -198,6 +201,25 @@ export async function seedSiteSurveyDefaultLines(
   const { data } = await api.post<SiteSurveyStructuredResponse>(
     `/api/sales/site-surveys/${id}/seed-default-lines/`,
     { overwrite },
+  )
+  return data
+}
+
+export async function refreshSiteSurveyDeploymentAssumptions(
+  surveyId: number,
+): Promise<SurveyDeploymentAssumptionRefreshResult> {
+  const { data } = await api.post<SurveyDeploymentAssumptionRefreshResult>(
+    `/api/sales/site-surveys/${surveyId}/refresh-deployment-assumptions/`,
+    {},
+  )
+  return data
+}
+
+export async function getSiteSurveyCommercialPreview(
+  surveyId: number,
+): Promise<SiteSurveyCommercialPreview> {
+  const { data } = await api.get<SiteSurveyCommercialPreview>(
+    `/api/sales/site-surveys/${surveyId}/commercial-preview/`,
   )
   return data
 }
@@ -487,6 +509,21 @@ export async function sendProposalToClient(
     payload,
   )
   return data
+}
+
+/**
+ * Download client proposal PDF (authenticated).
+ * Returns blob and suggested filename on success.
+ */
+export async function downloadClientProposalPdf(
+  proposalId: number,
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await api.get(`/api/sales/proposal-versions/${proposalId}/client-document/pdf/`, {
+    responseType: 'blob',
+  })
+  const contentDisposition = res.headers['content-disposition'] as string | undefined
+  const filename = parseContentDispositionFilename(contentDisposition) ?? `proposal-${proposalId}-client.pdf`
+  return { blob: res.data as Blob, filename }
 }
 
 export async function convertProposalToMobilisation(

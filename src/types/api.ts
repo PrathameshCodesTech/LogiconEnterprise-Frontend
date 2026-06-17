@@ -71,6 +71,12 @@ export interface MeResponse {
   primary_role_codes: string[]
   /** Backend-driven: persona for nav grouping */
   nav_persona: NavPersona
+  /** User's assigned department ID (for internal MRF creation) */
+  department?: number | null
+  /** User's assigned department name */
+  department_name?: string | null
+  /** User's assigned department code */
+  department_code?: string | null
 }
 
 

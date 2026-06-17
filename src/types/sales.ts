@@ -152,7 +152,15 @@ export interface SiteSurveyShiftDeployment {
   first_shift_count?: number | null
   second_shift_count?: number | null
   night_shift_count?: number | null
+  reliever_count?: number | null
   total_count?: number | null // Read-only, calculated by backend
+  shift_hours?: number | null
+  working_days?: number | null
+  base_wage?: string | number | null
+  base_wage_source?: string | null // 'wage_master' | 'wage_master_daily' | null
+  base_wage_overridden?: boolean
+  base_wage_override_reason?: string | null
+  monthly_amount?: string | number | null // Read-only, calculated by backend
   remarks?: string
   is_applicable?: boolean
   not_applicable_reason?: string | null
@@ -215,6 +223,46 @@ export interface SiteSurveyStructuredResponse {
   location_lines: SiteSurveyLocationLine[]
   equipment_lines: SiteSurveyEquipmentLine[]
   issue_lines: SiteSurveyIssueLine[]
+  site_context?: SalesLeadSite | null
+}
+
+// ─── Survey Deployment Assumption Refresh ─────────────────────────────────────
+
+export interface SurveyDeploymentAssumptionRefreshUpdated {
+  id: number
+  description: string
+  job_role: number
+  job_role_name: string
+  fields: string[]
+  base_wage: string | null
+  base_wage_source: string
+  monthly_amount: string
+}
+
+export interface SurveyDeploymentAssumptionRefreshSkipped {
+  id: number
+  description: string
+  reason: 'not_applicable' | 'aggregate_row' | 'already_current' | string
+}
+
+export interface SurveyDeploymentAssumptionRefreshError {
+  id: number
+  description: string
+  job_role?: number | null
+  job_role_name?: string | null
+  code: 'role_required' | 'wage_not_found' | string
+  message: string
+}
+
+export interface SurveyDeploymentAssumptionRefreshResult {
+  updated: SurveyDeploymentAssumptionRefreshUpdated[]
+  skipped: SurveyDeploymentAssumptionRefreshSkipped[]
+  errors: SurveyDeploymentAssumptionRefreshError[]
+  summary: {
+    updated: number
+    skipped: number
+    errors: number
+  }
 }
 
 // ─── Proposal ─────────────────────────────────────────────────────────────────
@@ -267,9 +315,15 @@ export interface ProposalBudgetLine {
   manpower_count?: number | null
   unit_cost?: string | null
   total_cost?: string | null
+  source_unit_cost?: string | null
+  source_unit_cost_origin?: string | null
   remarks?: string
   sort_order?: number
   is_manual_override?: boolean
+  override_reason?: string | null
+  overridden_by?: number | null
+  overridden_by_name?: string | null
+  overridden_at?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -307,8 +361,18 @@ export interface SalesRoleRequirement {
   wage_category_name?: string | null
   service_category?: string
   manpower_count: number
+  general_count?: number | null
+  first_shift_count?: number | null
+  second_shift_count?: number | null
+  night_shift_count?: number | null
+  reliever_count?: number | null
   shift_hours?: string | null
   working_days?: number | null
+  operational_base_wage?: string | number | null
+  operational_base_wage_source?: string | null
+  operational_base_wage_overridden?: boolean
+  operational_base_wage_override_reason?: string | null
+  operational_monthly_amount?: string | number | null
   remarks?: string
   is_active?: boolean
   created_from_survey?: boolean
@@ -558,4 +622,80 @@ export type PublicProposalResponseSubmit = {
   respondent_name: string
   respondent_email: string
   remarks?: string
+}
+
+// ─── Commercial Preview ──────────────────────────────────────────────────────
+
+export interface SiteSurveyCommercialPreviewComponent {
+  component_name: string
+  component_type: string
+  percentage: string | null
+  amount: string | null
+  sort_order: number
+}
+
+export interface SiteSurveyCommercialPreviewRow {
+  sales_role_requirement_id: number
+  site_id: number | null
+  site_name: string | null
+  job_role_id: number | null
+  job_role_name: string | null
+  job_role_code: string | null
+  wage_category_id: number | null
+  wage_category_name: string | null
+  headcount: string | number
+  general_count: string | number | null
+  first_shift_count: string | number | null
+  second_shift_count: string | number | null
+  night_shift_count: string | number | null
+  reliever_count: string | number | null
+  shift_hours: string | null
+  working_days: string | number | null
+  operational_base_wage: string | number | null
+  operational_base_wage_source: string | null
+  operational_base_wage_overridden: boolean
+  operational_base_wage_override_reason: string | null
+  operational_monthly_amount: string | number | null
+  source_unit_cost: string | number | null
+  source_unit_cost_origin: string | null
+  unit_cost: string | number | null
+  total_cost: string | number | null
+  components: SiteSurveyCommercialPreviewComponent[]
+}
+
+export interface SiteSurveyCommercialPreviewTotals {
+  manpower_total: string | number | null
+  subtotal_amount: string | number | null
+  management_fee_percent: string | number | null
+  management_fee_amount: string | number | null
+  gst_applicable: boolean
+  gst_amount: string | number | null
+  grand_total: string | number | null
+}
+
+export interface SiteSurveyCommercialPreviewError {
+  code: string
+  message: string
+  sales_role_requirement_id?: number | null
+  job_role_id?: number | null
+  job_role_name?: string | null
+  reasons?: string[]
+  missing_codes?: string[]
+}
+
+export interface SiteSurveyCommercialPreviewWarning {
+  code: string
+  message: string
+}
+
+export interface SiteSurveyCommercialPreview {
+  ready: boolean
+  can_generate_proposal: boolean
+  survey: { id: number; status: string }
+  lead: { id: number; client_name: string }
+  site: { id: number; site_name: string } | null
+  rows: SiteSurveyCommercialPreviewRow[]
+  totals: SiteSurveyCommercialPreviewTotals
+  errors: SiteSurveyCommercialPreviewError[]
+  warnings: SiteSurveyCommercialPreviewWarning[]
 }

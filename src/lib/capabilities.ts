@@ -100,6 +100,8 @@ export const CAP = {
   INTERVIEW_READ: 'interview.read',
   INTERVIEW_CREATE: 'interview.create',
   INTERVIEW_MANAGE: 'interview.manage',
+  INTERVIEW_ASSIGNMENT_READ: 'interview.assignment.read',
+  INTERVIEW_FEEDBACK_CREATE: 'interview.feedback.create',
 
   OFFER_READ: 'offer.read',
   OFFER_CREATE: 'offer.create',
@@ -130,6 +132,8 @@ export const CAP = {
   DEPARTMENT_CREATE: 'department.create',
   DEPARTMENT_UPDATE: 'department.update',
   DEPARTMENT_DELETE: 'department.delete',
+
+  ASSET_VAULT_ACCESS: 'asset_vault.access',
 } as const
 
 export function hasAnyCapability(userCaps: string[] | undefined, required: string[]): boolean {

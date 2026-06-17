@@ -1,4 +1,5 @@
 import { api } from '@/api/client'
+import { parseContentDispositionFilename } from '@/lib/fileDownload'
 import type { PublicProposalResponse, PublicProposalResponseSubmit } from '@/types/sales'
 
 /**
@@ -22,4 +23,19 @@ export async function submitPublicProposalResponse(
     payload,
   )
   return data
+}
+
+/**
+ * Download client proposal PDF (public - token auth).
+ * Returns blob and suggested filename on success.
+ */
+export async function downloadPublicProposalPdf(
+  token: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await api.get(`/api/sales/public/proposal-response/${token}/client-document/pdf/`, {
+    responseType: 'blob',
+  })
+  const contentDisposition = res.headers['content-disposition'] as string | undefined
+  const filename = parseContentDispositionFilename(contentDisposition) ?? 'commercial-proposal.pdf'
+  return { blob: res.data as Blob, filename }
 }

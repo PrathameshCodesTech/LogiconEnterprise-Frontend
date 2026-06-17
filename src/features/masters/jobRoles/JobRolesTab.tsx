@@ -19,7 +19,14 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { Spinner } from '@/components/ui/Spinner'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { JobRoleForm, type JobRoleFormValues } from '@/features/masters/jobRoles/JobRoleForm'
-import { SKILL_CATEGORY_OPTIONS, skillCategoryLabel } from '@/features/masters/jobRoles/types'
+import {
+  HIRING_LANE_OPTIONS,
+  hiringLaneBadgeVariant,
+  hiringLaneLabel,
+  SKILL_CATEGORY_OPTIONS,
+  skillCategoryLabel,
+  type HiringLane,
+} from '@/features/masters/jobRoles/types'
 
 function parseBoolParam(v: string | null): boolean | undefined {
   if (v === 'true') return true
@@ -62,6 +69,7 @@ export function JobRolesTab() {
 
   const [search, setSearch] = useState('')
   const [skillCategory, setSkillCategory] = useState<SkillCategory | ''>('')
+  const [hiringLane, setHiringLane] = useState<HiringLane | ''>('')
   const [isActive, setIsActive] = useState<boolean | undefined>(undefined)
   const [page, setPage] = useState(1)
 
@@ -75,6 +83,9 @@ export function JobRolesTab() {
   const [editing, setEditing] = useState<JobRoleRow | null>(null)
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [deactivateTarget, setDeactivateTarget] = useState<JobRoleRow | null>(null)
+  const [deactivateError, setDeactivateError] = useState<string | null>(null)
+  const [deactivatingId, setDeactivatingId] = useState<number | null>(null)
   const formId = useMemo(() => `jr-form-${drawerMode}`, [drawerMode])
 
   const orgId = me?.org ?? undefined
@@ -89,6 +100,7 @@ export function JobRolesTab() {
           search: search || undefined,
           org: orgId,
           skill_category: skillCategory || undefined,
+          hiring_lane: hiringLane || undefined,
           is_active: isActive,
           page: usePage,
         })
@@ -102,7 +114,7 @@ export function JobRolesTab() {
         setLoading(false)
       }
     },
-    [search, orgId, skillCategory, isActive, page],
+    [search, orgId, skillCategory, hiringLane, isActive, page],
   )
 
   useEffect(() => {
@@ -118,6 +130,8 @@ export function JobRolesTab() {
     setDrawerMode('create')
     setEditing(null)
     setFormError(null)
+    setDeactivateTarget(null)
+    setDeactivateError(null)
     setDrawerOpen(true)
   }
 
@@ -125,6 +139,8 @@ export function JobRolesTab() {
     setDrawerMode('edit')
     setEditing(r)
     setFormError(null)
+    setDeactivateTarget(null)
+    setDeactivateError(null)
     setDrawerOpen(true)
   }
 
@@ -143,6 +159,7 @@ export function JobRolesTab() {
         code: values.code.trim(),
         description: values.description.trim() || '',
         skill_category: values.skill_category as SkillCategory,
+        hiring_lane: values.hiring_lane as HiringLane,
         is_active: values.is_active,
       }
       if (drawerMode === 'create') {
@@ -162,13 +179,21 @@ export function JobRolesTab() {
 
   async function handleDeactivate(r: JobRoleRow) {
     if (!canDelete) return
-    const ok = window.confirm(`Deactivate job role "${r.name}"? This sets inactive.`)
-    if (!ok) return
+    if (deactivateTarget?.id !== r.id) {
+      setDeactivateTarget(r)
+      setDeactivateError(null)
+      return
+    }
+    setDeactivatingId(r.id)
+    setDeactivateError(null)
     try {
       await deleteJobRole(r.id)
+      setDeactivateTarget(null)
       await refresh()
     } catch (e: unknown) {
-      alert(parseApiError(e, 'Deactivate failed').message)
+      setDeactivateError(parseApiError(e, 'Deactivate failed').message)
+    } finally {
+      setDeactivatingId(null)
     }
   }
 
@@ -183,8 +208,16 @@ export function JobRolesTab() {
             </div>
             {r.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
           </div>
-          <p className="mt-2 text-xs text-app-secondary">{skillCategoryLabel(r.skill_category, r.skill_category_display)}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Badge variant={hiringLaneBadgeVariant(r.hiring_lane)}>
+              {hiringLaneLabel(r.hiring_lane, r.hiring_lane_display)}
+            </Badge>
+            <span className="text-xs text-app-secondary">{skillCategoryLabel(r.skill_category, r.skill_category_display)}</span>
+          </div>
           {r.description ? <p className="mt-2 line-clamp-3 text-xs text-app-subtle">{r.description}</p> : null}
+          {deactivateError && deactivateTarget?.id === r.id ? (
+            <p className="mt-3 text-xs text-status-danger">{deactivateError}</p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-2">
             {canUpdate ? (
               <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
@@ -192,8 +225,13 @@ export function JobRolesTab() {
               </Button>
             ) : null}
             {canDelete ? (
-              <Button variant="danger" className="min-h-9 px-3" onClick={() => handleDeactivate(r)} disabled={!r.is_active}>
-                Deactivate
+              <Button
+                variant="danger"
+                className="min-h-9 px-3"
+                onClick={() => handleDeactivate(r)}
+                disabled={!r.is_active || deactivatingId === r.id}
+              >
+                {deactivatingId === r.id ? 'Deactivating...' : deactivateTarget?.id === r.id ? 'Confirm deactivate' : 'Deactivate'}
               </Button>
             ) : null}
           </div>
@@ -235,7 +273,7 @@ export function JobRolesTab() {
             />
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:w-[360px]">
+        <div className="grid gap-3 sm:grid-cols-3 lg:w-[540px]">
           <div>
             <p className="mb-1 text-xs font-medium text-app-subtle">Skill category</p>
             <CompactSelect
@@ -248,6 +286,24 @@ export function JobRolesTab() {
             >
               <option value="">All</option>
               {SKILL_CATEGORY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </CompactSelect>
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-medium text-app-subtle">Hiring category</p>
+            <CompactSelect
+              ariaLabel="Filter by hiring category"
+              value={hiringLane}
+              onChange={(v) => {
+                setHiringLane((v || '') as HiringLane | '')
+                setPage(1)
+              }}
+            >
+              <option value="">All</option>
+              {HIRING_LANE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
@@ -295,6 +351,7 @@ export function JobRolesTab() {
                 <TR>
                   <TH>Name</TH>
                   <TH>Code</TH>
+                  <TH>Hiring category</TH>
                   <TH>Skill category</TH>
                   <TH>Description</TH>
                   <TH>Status</TH>
@@ -306,10 +363,18 @@ export function JobRolesTab() {
                   <TR key={r.id}>
                     <TD className="font-medium text-app-text">{r.name}</TD>
                     <TD className="font-mono text-app-secondary">{r.code}</TD>
+                    <TD>
+                      <Badge variant={hiringLaneBadgeVariant(r.hiring_lane)}>
+                        {hiringLaneLabel(r.hiring_lane, r.hiring_lane_display)}
+                      </Badge>
+                    </TD>
                     <TD className="text-app-secondary">{skillCategoryLabel(r.skill_category, r.skill_category_display)}</TD>
-                    <TD className="max-w-[240px] truncate text-xs text-app-subtle">{r.description || '—'}</TD>
+                    <TD className="max-w-[240px] truncate text-xs text-app-subtle">{r.description || '-'}</TD>
                     <TD>{r.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}</TD>
                     <TD className="text-right">
+                      {deactivateError && deactivateTarget?.id === r.id ? (
+                        <p className="mb-2 text-xs text-status-danger">{deactivateError}</p>
+                      ) : null}
                       <div className="flex justify-end gap-2">
                         {canUpdate ? (
                           <Button variant="secondary" className="min-h-9 px-3" onClick={() => openEdit(r)}>
@@ -321,9 +386,9 @@ export function JobRolesTab() {
                             variant="danger"
                             className="min-h-9 px-3"
                             onClick={() => handleDeactivate(r)}
-                            disabled={!r.is_active}
+                            disabled={!r.is_active || deactivatingId === r.id}
                           >
-                            Deactivate
+                            {deactivatingId === r.id ? 'Deactivating...' : deactivateTarget?.id === r.id ? 'Confirm deactivate' : 'Deactivate'}
                           </Button>
                         ) : null}
                       </div>
@@ -384,6 +449,10 @@ export function JobRolesTab() {
                   name: editing.name,
                   code: editing.code,
                   skill_category: editing.skill_category,
+                  hiring_lane:
+                    editing.hiring_lane === 'client_billable' || editing.hiring_lane === 'internal_non_billable'
+                      ? editing.hiring_lane
+                      : '',
                   description: editing.description ?? '',
                   is_active: editing.is_active,
                 }

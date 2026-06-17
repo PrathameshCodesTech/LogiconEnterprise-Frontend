@@ -99,6 +99,7 @@ export function MRFListPage() {
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspaceInitialMRF, setWorkspaceInitialMRF] = useState<MRFRow | null>(null)
+  const [createMode, setCreateMode] = useState<'billable' | 'internal' | null>(null)
   const [deleteCandidateId, setDeleteCandidateId] = useState<number | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -203,13 +204,21 @@ export function MRFListPage() {
   const visibleRows = useMemo(() => {
     if (!client) return rows
     return rows.filter((r) => {
+      if (r.site == null) return false
       const s = siteById.get(r.site)
       return s?.client === client
     })
   }, [rows, client, siteById])
 
-  function openCreate() {
+  function openCreateBillable() {
     setWorkspaceInitialMRF(null)
+    setCreateMode('billable')
+    setWorkspaceOpen(true)
+  }
+
+  function openCreateInternal() {
+    setWorkspaceInitialMRF(null)
+    setCreateMode('internal')
     setWorkspaceOpen(true)
   }
 
@@ -241,7 +250,8 @@ export function MRFListPage() {
   const mobileCards = (
     <div className="grid gap-3 md:hidden">
       {visibleRows.map((r) => {
-        const s = siteById.get(r.site)
+        const isInternal = r.billing_type === 'non_billable' && (r.site == null || r.site === 0)
+        const s = r.site != null && r.site !== 0 ? siteById.get(r.site) : undefined
         const c = s ? clientById.get(s.client) : undefined
         return (
           <button
@@ -258,8 +268,17 @@ export function MRFListPage() {
                     <span className="ml-1 font-mono text-xs font-normal text-app-secondary">({r.request_number})</span>
                   ) : null}
                 </p>
-                <p className="truncate text-xs text-app-secondary">{c ? c.name : '-'}</p>
-                <p className="truncate text-xs text-app-subtle">{s ? s.name : `Site #${r.site}`}</p>
+                {isInternal ? (
+                  <>
+                    <p className="truncate text-xs font-medium text-status-warning">Internal department request</p>
+                    <p className="truncate text-xs text-app-subtle">Dept: {r.required_department_name ?? `#${r.required_department ?? '-'}`}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="truncate text-xs text-app-secondary">{c ? c.name : '-'}</p>
+                    <p className="truncate text-xs text-app-subtle">{s ? s.name : (r.site != null ? `Site #${r.site}` : '-')}</p>
+                  </>
+                )}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 <MRFStatusBadge status={r.status} />
@@ -300,9 +319,14 @@ export function MRFListPage() {
           <p className="text-sm text-app-secondary">Manpower requests raised for sites, with role line items.</p>
         </div>
         {canCreate ? (
-          <Button onClick={openCreate} className="sm:self-start" disabled={!!lookupError}>
-            Create MRF
-          </Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button onClick={openCreateBillable} className="sm:self-start" disabled={!!lookupError}>
+              Create Client/Site MRF
+            </Button>
+            <Button onClick={openCreateInternal} variant="secondary" className="sm:self-start">
+              Create Internal MRF
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -442,7 +466,8 @@ export function MRFListPage() {
               </THead>
               <TBody>
                 {visibleRows.map((r) => {
-                  const s = siteById.get(r.site)
+                  const isInternal = r.billing_type === 'non_billable' && (r.site == null || r.site === 0)
+                  const s = r.site != null && r.site !== 0 ? siteById.get(r.site) : undefined
                   const c = s ? clientById.get(s.client) : undefined
                   const { requesting, required } = formatMrfDeptSummary(r)
                   return (
@@ -452,9 +477,12 @@ export function MRFListPage() {
                         {r.request_number?.trim() ? (
                           <span className="mt-0.5 block truncate font-mono text-[11px] text-app-subtle">{r.request_number}</span>
                         ) : null}
+                        {isInternal ? (
+                          <span className="mt-0.5 block text-[10px] font-medium text-status-warning">Internal</span>
+                        ) : null}
                       </TD>
-                      <TD className="py-2 text-sm text-app-secondary">{c?.name ?? '-'}</TD>
-                      <TD className="py-2 text-sm text-app-secondary">{s?.name ?? `Site #${r.site}`}</TD>
+                      <TD className="py-2 text-sm text-app-secondary">{isInternal ? '-' : (c?.name ?? '-')}</TD>
+                      <TD className="py-2 text-sm text-app-secondary">{isInternal ? '-' : (s?.name ?? (r.site != null ? `Site #${r.site}` : '-'))}</TD>
                       {!isClient ? (
                         <TD className="max-w-[200px] py-2 text-xs text-app-secondary">
                           <div className="truncate" title={`Requesting: ${requesting}`}>
@@ -536,9 +564,11 @@ export function MRFListPage() {
         <MRFCreateWorkspaceDrawer
           open={workspaceOpen}
           initialMRF={workspaceInitialMRF}
+          createMode={createMode}
           onClose={() => {
             setWorkspaceOpen(false)
             setWorkspaceInitialMRF(null)
+            setCreateMode(null)
             void refresh()
           }}
           onFinished={() => {
@@ -555,4 +585,3 @@ export function MRFListPage() {
     </div>
   )
 }
-
